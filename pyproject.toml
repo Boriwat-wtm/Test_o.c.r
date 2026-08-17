@@ -17,8 +17,13 @@ dependencies = [
 [project.optional-dependencies]
 # ติดตั้งทีหลังทีละตัว เพราะแต่ละตัวหนักและชนกันได้
 tesseract = ["pytesseract>=0.3.10"]
-easyocr = ["easyocr>=1.7.1"]
-paddle = ["rapidocr-onnxruntime>=1.3.24"]
+easyocr = ["easyocr>=1.7.2"]          # ล่าสุดจริง แต่โปรเจกต์นิ่งมาตั้งแต่ ก.ย. 2024
+surya = ["surya-ocr>=0.22.1"]
+paddle = ["paddleocr>=3.7.0", "paddlepaddle>=3.3.1"]
+# ตัวสำรองของ paddle ถ้า paddlepaddle ติดตั้งบน Windows ไม่ผ่าน
+# ใช้โมเดลชุดเดียวกันผ่าน ONNX จึงไม่ต้องพึ่ง framework ของ Paddle
+# หมายเหตุ: แพ็กเกจชื่อ rapidocr-onnxruntime เลิกพัฒนาแล้ว (ค้างที่ 1.4.4)
+rapid = ["rapidocr>=3.9.2", "onnxruntime>=1.20"]
 
 [build-system]
 requires = ["hatchling"]

@@ -125,6 +125,114 @@ def compare(
     return score
 
 
+@dataclass
+class LinePair:
+    """คู่ระหว่างบรรทัดในเฉลยกับบรรทัดที่ OCR อ่านได้
+
+    truth_index เป็น None  = OCR พ่นบรรทัดนี้เกินมา ไม่มีในเฉลย (ลายน้ำ ลายเซ็น ขยะ)
+    pred_index เป็น None   = OCR ไม่ได้อ่านบรรทัดนี้เลย
+    """
+
+    truth_index: int | None
+    pred_index: int | None
+    truth: str
+    pred: str
+    score: LineScore | None = None
+
+
+@dataclass
+class PageScore:
+    pairs: list[LinePair] = field(default_factory=list)
+    matched: list[LineScore] = field(default_factory=list)
+    spurious_lines: int = 0
+    spurious_chars: int = 0
+    missed_lines: int = 0
+    missed_chars: int = 0
+    truth_lines: int = 0
+
+    @property
+    def matched_cer(self) -> float | None:
+        """ความผิดของตัวอักษรเฉพาะบรรทัดที่จับคู่ได้ — วัด 'อ่านแม่นแค่ไหน'"""
+        total = sum(s.truth_len for s in self.matched)
+        return sum(s.edits for s in self.matched) / total if total else None
+
+    @property
+    def recall(self) -> float | None:
+        """สัดส่วนบรรทัดในเฉลยที่ OCR หาเจอ — วัด 'อ่านครบแค่ไหน'"""
+        if not self.truth_lines:
+            return None
+        return (self.truth_lines - self.missed_lines) / self.truth_lines
+
+
+def align_lines(
+    truth_lines: list[str],
+    pred_lines: list[str],
+    *,
+    threshold: float = 0.45,
+) -> PageScore:
+    """จับคู่บรรทัดเฉลยกับบรรทัดที่ OCR อ่านได้ ด้วยความคล้ายของข้อความ
+
+    ทำไมต้องจับคู่ทีละบรรทัด ไม่ต่อทั้งหน้าเป็นก้อนเดียว
+      1. OCR แต่ละตัวลำดับการอ่านไม่เหมือนกัน ต่อเป็นก้อนแล้วเทียบจะเพี้ยนทั้งที่อ่านถูก
+      2. ตัวที่อ่านลายน้ำหรือลายเซ็นเจอ จะถูกลงโทษหนักเกินจริงเพราะมีตัวอักษรเกิน
+         ทั้งที่ความผิดจริงคือ "ตรวจเจอสิ่งที่ไม่ควรเจอ" ไม่ใช่ "อ่านตัวอักษรผิด"
+
+    แยกรายงานสามอย่างจึงตรงกับความจริงกว่า
+      matched_cer      อ่านตัวอักษรแม่นแค่ไหน (เฉพาะบรรทัดที่จับคู่ได้)
+      recall           อ่านครบแค่ไหน
+      spurious_lines   พ่นบรรทัดเกินมาเท่าไร
+    """
+    norm_truth = [normalize(t) for t in truth_lines]
+    norm_pred = [normalize(p) for p in pred_lines]
+
+    candidates: list[tuple[float, int, int]] = []
+    for ti, t in enumerate(norm_truth):
+        if not t:
+            continue
+        for pi, p in enumerate(norm_pred):
+            if not p:
+                continue
+            sim = Levenshtein.normalized_similarity(t, p)
+            if sim >= threshold:
+                candidates.append((sim, ti, pi))
+
+    # จับคู่แบบละโมบจากคู่ที่คล้ายที่สุดลงมา หนึ่งบรรทัดจับคู่ได้ครั้งเดียว
+    candidates.sort(reverse=True)
+    used_truth: set[int] = set()
+    used_pred: set[int] = set()
+    matches: dict[int, int] = {}
+    for _sim, ti, pi in candidates:
+        if ti in used_truth or pi in used_pred:
+            continue
+        matches[ti] = pi
+        used_truth.add(ti)
+        used_pred.add(pi)
+
+    page = PageScore(truth_lines=sum(1 for t in norm_truth if t))
+
+    for ti, truth_line in enumerate(truth_lines):
+        if not norm_truth[ti]:
+            continue
+        if ti in matches:
+            pi = matches[ti]
+            score = compare(truth_line, pred_lines[pi])
+            page.matched.append(score)
+            page.pairs.append(LinePair(ti, pi, truth_line, pred_lines[pi], score))
+        else:
+            page.missed_lines += 1
+            page.missed_chars += len(norm_truth[ti])
+            page.pairs.append(LinePair(ti, None, truth_line, "", compare(truth_line, "")))
+
+    for pi, pred_line in enumerate(pred_lines):
+        if pi in used_pred or not norm_pred[pi]:
+            continue
+        page.spurious_lines += 1
+        page.spurious_chars += len(norm_pred[pi])
+        page.pairs.append(LinePair(None, pi, "", pred_line))
+
+    return page
+
+
 def thai_digit_report(truth: str, pred: str) -> dict[str, float | int | None]:
     """รายงานเฉพาะเลขไทย — ตัวชี้วัดหลักของงานนี้
 
