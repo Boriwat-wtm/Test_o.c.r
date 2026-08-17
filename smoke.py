@@ -37,9 +37,13 @@ def main() -> None:
 
         text = result.text
         thai_digits = sum(text.count(d) for d in THAI_DIGITS)
+        overhead = result.elapsed_ms - (result.core_ms or result.elapsed_ms)
+        timing = f"{result.core_ms:.0f} ms"
+        if overhead > 1:
+            timing += f" (+{overhead:.0f} ms สำหรับกรอบตำแหน่ง)"
         print(
             f"[{engine.name}] {len(result.lines)} บรรทัด · {len(text)} ตัวอักษร · "
-            f"เลขไทย {thai_digits} ตัว · {result.elapsed_ms:.0f} ms"
+            f"เลขไทย {thai_digits} ตัว · {timing}"
         )
         print("-" * 70)
         for line in result.lines[:14]:

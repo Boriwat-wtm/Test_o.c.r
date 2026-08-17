@@ -29,6 +29,10 @@ class OcrResult:
     page_id: str
     lines: list[OcrLine] = field(default_factory=list)
     elapsed_ms: float = 0.0
+    # เวลาเฉพาะส่วนที่ต้องใช้จริงตอนใช้งาน ไม่รวมงานที่ทำเพื่อหน้าเว็บอย่างเดียว
+    # เช่น Tesseract ต้องเรียกซ้ำอีกรอบเพื่อเอากรอบตำแหน่ง ซึ่งงานจริงไม่ต้องใช้
+    # ถ้าไม่ระบุ ถือว่าเท่ากับ elapsed_ms
+    core_ms: float | None = None
     error: str | None = None
 
     @property
@@ -51,7 +55,12 @@ class Engine:
         """พร้อมใช้งานไหม คืน (พร้อม, เหตุผลถ้าไม่พร้อม)"""
         raise NotImplementedError
 
-    def _run(self, image_path: Path) -> list[OcrLine]:
+    def _run(self, image_path: Path) -> list[OcrLine] | tuple[list[OcrLine], float]:
+        """อ่านภาพหนึ่งหน้า
+
+        คืนรายการบรรทัด หรือคืนคู่ (บรรทัด, เวลาเฉพาะส่วนที่ใช้งานจริงเป็นมิลลิวินาที)
+        ถ้า engine ต้องทำงานเพิ่มเพื่อหน้าเว็บโดยเฉพาะ
+        """
         raise NotImplementedError
 
     def run(self, image_path: Path, page_id: str) -> OcrResult:
@@ -61,16 +70,23 @@ class Engine:
         แล้วให้ตัวอื่นรันต่อ หน้าเว็บจะแสดงว่าตัวนี้พังที่หน้าไหน
         """
         started = time.perf_counter()
+        core_ms: float | None = None
         try:
-            lines = self._run(image_path)
+            outcome = self._run(image_path)
+            if isinstance(outcome, tuple):
+                lines, core_ms = outcome
+            else:
+                lines = outcome
             error = None
         except Exception as exc:  # noqa: BLE001 — ตั้งใจดักทุกอย่าง
             lines, error = [], f"{type(exc).__name__}: {exc}"
+        elapsed_ms = (time.perf_counter() - started) * 1000
         return OcrResult(
             engine=self.name,
             page_id=page_id,
             lines=lines,
-            elapsed_ms=(time.perf_counter() - started) * 1000,
+            elapsed_ms=elapsed_ms,
+            core_ms=core_ms if core_ms is not None else elapsed_ms,
             error=error,
         )
 
