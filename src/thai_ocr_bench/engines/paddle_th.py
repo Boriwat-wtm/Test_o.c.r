@@ -70,13 +70,16 @@ class PaddleThai(Engine):
         core_ms = (time.perf_counter() - started) * 1000
 
         lines: list[OcrLine] = []
-        for page in results or []:
+        for page in results if results is not None else []:
             data = page if isinstance(page, dict) else getattr(page, "res", page)
-            texts = data.get("rec_texts") or []
-            scores = data.get("rec_scores") or []
+            # ห้ามใช้ `or []` กับค่าที่ Paddle คืนมา เพราะบางคีย์เป็น numpy array
+            # การเช็คความจริงของ array หลายสมาชิกทำให้ ValueError
+            texts = _as_list(data.get("rec_texts"))
+            scores = _as_list(data.get("rec_scores"))
             polys = data.get("rec_polys")
             if polys is None:
-                polys = data.get("dt_polys") or []
+                polys = data.get("dt_polys")
+            polys = _as_list(polys)
 
             for i, text in enumerate(texts):
                 if not str(text).strip():
@@ -92,6 +95,13 @@ class PaddleThai(Engine):
         # PaddleOCR คืนผลตามลำดับที่ตรวจเจอ ไม่ใช่ลำดับการอ่าน จึงต้องเรียงเอง
         lines.sort(key=lambda ln: (ln.box[1] if ln.box else 0, ln.box[0] if ln.box else 0))
         return lines, core_ms
+
+
+def _as_list(value: Any) -> list:
+    """แปลงค่าที่ Paddle คืนมาเป็น list โดยไม่แตะความจริงของ numpy array"""
+    if value is None:
+        return []
+    return list(value)
 
 
 def _to_box(poly: Any) -> tuple[int, int, int, int] | None:

@@ -22,9 +22,12 @@ _CACHE = _ROOT / "vendor" / "cache"
 # ตัวแปร -> โฟลเดอร์ย่อย  (ยืนยันชื่อตัวแปรจากซอร์สของแต่ละไลบรารีแล้ว)
 _CACHE_VARS = {
     "PADDLE_PDX_CACHE_HOME": "paddlex",  # paddlex/utils/cache.py
-    "HF_HOME": "huggingface",  # Typhoon, Surya, TrOCR
+    "HF_HOME": "huggingface",  # Typhoon, TrOCR
     "EASYOCR_MODULE_PATH": "easyocr",
     "TORCH_HOME": "torch",
+    # Surya ไม่เคารพ HF_HOME มันใช้ค่าของตัวเองซึ่งชี้ไป
+    # C:\Users\...\AppData\Local\datalab\ โดยปริยาย (surya/settings.py)
+    "MODEL_CACHE_DIR": "surya",
     "XDG_CACHE_HOME": "xdg",  # ตัวสำรองของไลบรารีที่เคารพมาตรฐานนี้
 }
 

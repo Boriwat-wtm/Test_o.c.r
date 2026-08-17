@@ -233,6 +233,25 @@ def align_lines(
     return page
 
 
+def page_cer(truth_lines: list[str], pred_lines: list[str]) -> float | None:
+    """CER ระดับหน้า — ต่อทุกบรรทัดเป็นก้อนเดียวแล้วตัดช่องว่างทิ้งก่อนเทียบ
+
+    มีไว้คู่กับ align_lines() เพราะทั้งสองค่าตอบคำถามต่างกัน
+
+    ค่านี้ไม่สนใจว่าขึ้นบรรทัดตรงไหน จึงเป็นธรรมกับ VLM อย่าง Typhoon
+    ที่รวมย่อหน้าเป็นบรรทัดเดียวแทนที่จะแบ่งตามบรรทัดในภาพ
+    แต่จะลงโทษหนักถ้าอ่านลายน้ำเจอเป็นร้อยบรรทัด เพราะนับเป็นตัวอักษรเกินทั้งหมด
+
+    ส่วน matched_cer จาก align_lines() ตรงกันข้าม — ทนต่อบรรทัดเกิน
+    แต่ลงโทษการรวมบรรทัด รายงานทั้งสองค่าจึงเห็นภาพครบ
+    """
+    truth_text = "\n".join(truth_lines)
+    pred_text = "\n".join(pred_lines)
+    if not normalize(truth_text):
+        return None
+    return compare(truth_text, pred_text).cer
+
+
 def thai_digit_report(truth: str, pred: str) -> dict[str, float | int | None]:
     """รายงานเฉพาะเลขไทย — ตัวชี้วัดหลักของงานนี้
 

@@ -16,7 +16,7 @@ import streamlit as st
 
 from thai_ocr_bench import store
 from thai_ocr_bench.config import IMAGE_DIR
-from thai_ocr_bench.metrics import Span, align_lines, thai_digit_report
+from thai_ocr_bench.metrics import Span, align_lines, page_cer, thai_digit_report
 from thai_ocr_bench.render import PageInfo, load_pages
 from thai_ocr_bench.thai_text import THAI_DIGITS
 from thai_ocr_bench.truth import load as load_truth, upsert as save_truth
@@ -207,8 +207,11 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
 
             score = align_lines(truth_lines, stored.lines)
             digits = thai_digit_report("\n".join(truth_lines), "\n".join(stored.lines))
+            whole = page_cer(truth_lines, stored.lines)
 
-            badges = pill(f"CER {score.matched_cer:.1%}", cer_tone(score.matched_cer)) if score.matched_cer is not None else ""
+            badges = pill(f"CER บรรทัด {score.matched_cer:.1%}", cer_tone(score.matched_cer)) if score.matched_cer is not None else ""
+            if whole is not None:
+                badges += pill(f"CER หน้า {whole:.1%}", cer_tone(whole))
             badges += pill(
                 f"อ่านครบ {score.truth_lines - score.missed_lines}/{score.truth_lines}",
                 "good" if (score.recall or 0) >= 0.95 else "bad",
@@ -265,12 +268,16 @@ def view_summary(pages: list[PageInfo], results: dict) -> None:
             d_total = d_strict = d_lenient = 0
             times: list[float] = []
 
+            page_cers: list[float] = []
             for page in group_pages:
                 stored = per_page.get(page.page_id)
                 if stored is None or not stored.ok:
                     continue
                 truth_lines = truth[page.page_id].lines
                 score = align_lines(truth_lines, stored.lines)
+                whole = page_cer(truth_lines, stored.lines)
+                if whole is not None:
+                    page_cers.append(whole)
                 edits += sum(s.edits for s in score.matched)
                 chars += sum(s.truth_len for s in score.matched)
                 missed += score.missed_lines
@@ -291,7 +298,8 @@ def view_summary(pages: list[PageInfo], results: dict) -> None:
                 {
                     "engine": name,
                     "ขอบเขต": group,
-                    "CER": f"{edits / chars:.1%}",
+                    "CER บรรทัด": f"{edits / chars:.1%}",
+                    "CER หน้า": f"{sum(page_cers) / len(page_cers):.1%}" if page_cers else "-",
                     "อ่านครบ": f"{found}/{found + missed}",
                     "บรรทัดเกิน": spurious,
                     "เลขไทย strict": f"{d_strict / d_total:.0%}" if d_total else "-",

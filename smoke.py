@@ -14,7 +14,9 @@ from thai_ocr_bench.thai_text import THAI_DIGITS
 
 
 def main() -> None:
-    page_id = sys.argv[1] if len(sys.argv) > 1 else None
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    page_id = args[0] if args else None
+    only = args[1].split(",") if len(args) > 1 else None
     pages = load_pages()
     if not pages:
         print("ยังไม่มีภาพ รัน render_pages.py ก่อน")
@@ -24,7 +26,7 @@ def main() -> None:
     image = IMAGE_DIR / f"{page.page_id}.png"
     print(f"หน้า {page.page_id} — {page.doc_name} หน้า {page.page_no}\n")
 
-    for engine in get_engines():
+    for engine in get_engines(only):
         ready, reason = engine.available()
         if not ready:
             print(f"[{engine.name}] ยังไม่พร้อม: {reason}\n")

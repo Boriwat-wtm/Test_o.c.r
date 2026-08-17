@@ -65,7 +65,12 @@ class ThaiTrOcr(Engine):
                 MODEL_ID, dtype=torch.float16
             ).to("cuda:0")
             self._model.eval()
-            self._detector = TextDetection(model_name="PP-OCRv5_mobile_det")
+            # ต้องส่ง enable_mkldnn=False ตรง ๆ ด้วย ไม่ใช่พึ่งแค่ตัวแปรแวดล้อม
+            # เพราะ paddle ถูก import ไปแล้วจาก engine ตัวก่อนในโปรเซสเดียวกัน
+            # ตัวแปรที่ตั้งทีหลังจึงไม่มีผล แล้วจะพังด้วยบั๊ก oneDNN เหมือนเดิม
+            self._detector = TextDetection(
+                model_name="PP-OCRv5_mobile_det", enable_mkldnn=False
+            )
         return self._model, self._processor, self._detector
 
     def _run(self, image_path: Path) -> tuple[list[OcrLine], float]:
@@ -77,9 +82,14 @@ class ThaiTrOcr(Engine):
         started = time.perf_counter()
         detected = detector.predict(str(image_path))
         boxes: list[tuple[int, int, int, int]] = []
-        for page in detected or []:
+        for page in detected if detected is not None else []:
             data = page if isinstance(page, dict) else getattr(page, "res", page)
-            for poly in data.get("dt_polys") or []:
+            # ห้ามใช้ `or []` กับค่าที่ Paddle คืนมา เพราะ dt_polys เป็น numpy array
+            # การเช็คความจริงของ array หลายสมาชิกทำให้ ValueError
+            polys = data.get("dt_polys")
+            if polys is None:
+                continue
+            for poly in polys:
                 box = _to_box(poly)
                 if box and box[3] >= MIN_LINE_HEIGHT:
                     boxes.append(box)
