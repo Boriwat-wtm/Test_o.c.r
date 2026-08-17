@@ -14,7 +14,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from thai_ocr_bench import store
+from thai_ocr_bench import progress, store
 from thai_ocr_bench.config import IMAGE_DIR
 from thai_ocr_bench.metrics import Span, align_lines, page_cer, thai_digit_report
 from thai_ocr_bench.render import PageInfo, load_pages
@@ -73,6 +73,86 @@ def cer_tone(cer: float | None) -> str:
 @st.cache_data(show_spinner=False)
 def cached_pages() -> list[PageInfo]:
     return load_pages()
+
+
+def fmt_eta(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    if seconds < 90:
+        return f"{seconds:.0f} วินาที"
+    return f"{seconds / 60:.0f} นาที"
+
+
+@st.fragment(run_every="3s")
+def progress_banner(total_pages: int) -> None:
+    """แถบความคืบหน้าของตัวรัน รีเฟรชตัวเองทุก 3 วินาที
+
+    ใช้ st.fragment เพื่อให้รีเฟรชแค่ส่วนนี้ ไม่ต้องโหลดหน้าทั้งหน้าใหม่
+    ซึ่งจะทำให้ตัวเลือกหน้าและ engine ที่ผู้ใช้เลือกไว้หลุด
+    """
+    status = progress.load()
+
+    # ไม่มีไฟล์สถานะ (เช่นรันด้วยโค้ดรุ่นก่อน) — เดาจากจำนวนผลที่เก็บได้
+    if status is None:
+        results = store.load()
+        if not results:
+            return
+        counts = {name: len(pages) for name, pages in results.items()}
+        run_size = max(counts.values()) if counts else 0
+        st.caption(
+            "ไม่พบไฟล์สถานะการรัน — ประมาณจากผลที่เก็บได้: "
+            + " · ".join(f"{n} {c}/{run_size}" for n, c in sorted(counts.items()))
+        )
+        return
+
+    if status.finished:
+        note = f" ({status.failures} หน้าพัง)" if status.failures else ""
+        st.success(
+            f"รันเสร็จแล้ว — {len(status.done_engines)} engine × "
+            f"{status.pages_total} หน้า{note}"
+        )
+        return
+
+    if status.stale:
+        age = status.age_seconds or 0
+        st.warning(
+            f"ตัวรันไม่อัปเดตมา {age / 60:.0f} นาที น่าจะหยุดไปแล้ว — "
+            f"ทำได้ {len(status.done_engines)}/{len(status.engines)} engine"
+        )
+        return
+
+    engine_name = status.current_engine or "กำลังเริ่ม"
+    overall = status.overall_fraction
+
+    st.markdown(
+        f"**กำลังรัน `{engine_name}`** &nbsp; "
+        f"engine ที่ {len(status.done_engines) + 1} จาก {len(status.engines)} &nbsp;·&nbsp; "
+        f"เหลืออีกประมาณ {fmt_eta(status.eta_seconds())}",
+        unsafe_allow_html=True,
+    )
+    st.progress(
+        overall,
+        text=f"รวมทั้งหมด {overall:.0%}",
+    )
+    st.progress(
+        status.engine_fraction,
+        text=(
+            f"{engine_name} — {status.pages_done}/{status.pages_total} หน้า"
+            + (
+                f" · หน้าล่าสุดใช้ {status.last_seconds:.1f}s"
+                if status.last_seconds
+                else ""
+            )
+        ),
+    )
+
+    waiting = [
+        e
+        for e in status.engines
+        if e not in status.done_engines and e != status.current_engine
+    ]
+    if waiting:
+        st.caption("รอคิว: " + " · ".join(waiting))
 
 
 def page_label(p: PageInfo) -> str:
@@ -342,6 +422,8 @@ def main() -> None:
         st.metric("เลขไทยในเฉลย", f"{digits_in_truth:,}")
         if not results:
             st.warning("ยังไม่มีผล OCR — รัน `run_bench.py`")
+
+    progress_banner(len(pages))
 
     tabs = st.tabs(["เปรียบเทียบ", "สรุปผล", "ทำเฉลย", "ตรวจภาพ"])
     with tabs[0]:

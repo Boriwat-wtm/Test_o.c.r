@@ -15,8 +15,9 @@ from __future__ import annotations
 import argparse
 import gc
 import time
+from datetime import datetime, timezone
 
-from thai_ocr_bench import store
+from thai_ocr_bench import progress, store
 from thai_ocr_bench.config import IMAGE_DIR
 from thai_ocr_bench.engines import get_engines
 from thai_ocr_bench.render import load_pages
@@ -66,6 +67,14 @@ def main() -> None:
 
     results = store.load()
 
+    # เขียนสถานะให้หน้าเว็บอ่าน เพื่อโชว์แถบความคืบหน้าระหว่างรัน
+    status = progress.RunStatus(
+        engines=[e.name for e in ready],
+        pages_total=len(pages),
+        started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+    progress.save(status)
+
     for engine in ready:
         pending = [
             p
@@ -74,13 +83,23 @@ def main() -> None:
         ]
         if not pending:
             print(f"[{engine.name}] มีผลครบแล้ว ข้าม")
+            status.done_engines.append(engine.name)
+            progress.save(status)
             continue
 
         print(f"[{engine.name}] {len(pending)} หน้า")
         started = time.perf_counter()
         failures = 0
 
+        status.current_engine = engine.name
+        status.pages_done = 0
+        status.pages_total = len(pending)
+        progress.save(status)
+
         for i, page in enumerate(pending, start=1):
+            status.current_page = page.page_id
+            progress.save(status)
+
             result = engine.run(IMAGE_DIR / f"{page.page_id}.png", page.page_id)
             results.setdefault(engine.name, {})[page.page_id] = store.from_result(result)
             store.save(results, {"versions": snapshot()})
@@ -95,15 +114,30 @@ def main() -> None:
                     f"{len(result.lines):>3} บรรทัด  {pace:>6.1f}s"
                 )
 
+            status.pages_done = i
+            status.failures = failures
+            status.last_seconds = (result.core_ms or 0) / 1000
+            progress.save(status)
+
         total = time.perf_counter() - started
         note = f" ({failures} หน้าพัง)" if failures else ""
         print(f"  รวม {total / 60:.1f} นาที{note}\n")
+
+        status.done_engines.append(engine.name)
+        status.current_engine = None
+        status.current_page = None
+        progress.save(status)
 
         # ปล่อยโมเดลออกจาก VRAM ก่อนขึ้นตัวถัดไป
         for attr in ("_model", "_processor", "_reader", "_rec", "_det", "_detector", "_ocr"):
             if hasattr(engine, attr):
                 setattr(engine, attr, None)
         free_gpu()
+
+    status.finished = True
+    status.current_engine = None
+    status.current_page = None
+    progress.save(status)
 
     print(f"เก็บผลไว้ที่ results/{store.RESULTS_FILE}")
     print("ดูผลรายหน้า:  .venv\\Scripts\\streamlit.exe run app.py")
