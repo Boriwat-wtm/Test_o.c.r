@@ -16,7 +16,13 @@ import streamlit as st
 
 from thai_ocr_bench import progress, store
 from thai_ocr_bench.config import IMAGE_DIR
-from thai_ocr_bench.metrics import Span, align_lines, page_cer, thai_digit_report
+from thai_ocr_bench.metrics import (
+    Span,
+    align_lines,
+    compare,
+    page_cer,
+    thai_digit_report,
+)
 from thai_ocr_bench.render import PageInfo, load_pages
 from thai_ocr_bench.thai_text import THAI_DIGITS
 from thai_ocr_bench.truth import load as load_truth, upsert as save_truth
@@ -35,6 +41,8 @@ CSS = """
   .truth  { font-size:15px; line-height:2.0; border-left:3px solid #1d3fbf;
             padding-left:10px; }
   .spur   { font-size:14px; line-height:1.9; opacity:.75; }
+  .gone   { font-size:14px; line-height:1.9; color:#b4342a; }
+  .gonetruth { opacity:.55; font-size:13px; }
   .pill   { display:inline-block; font-family:ui-monospace,Consolas,monospace;
             font-size:11px; padding:1px 7px; border-radius:3px; margin-right:5px; }
   .good   { background:#e5f0ea; color:#2e6b4f; }
@@ -68,6 +76,42 @@ def cer_tone(cer: float | None) -> str:
     if cer is None:
         return "warn"
     return "good" if cer <= 0.02 else "warn" if cer <= 0.10 else "bad"
+
+
+def merges_lines(truth_lines: list[str], pred_lines: list[str]) -> float | None:
+    """เดาว่า engine รวมหลายบรรทัดในภาพเป็นบรรทัดเดียวหรือไม่
+
+    VLM อย่าง Typhoon มักคืนย่อหน้าเป็นก้อนเดียวแทนที่จะแบ่งตามบรรทัดในภาพ
+    เมื่อเป็นแบบนั้น ค่า "อ่านครบ" ที่คิดจากการจับคู่บรรทัดจะต่ำผิดปกติ
+    ทั้งที่อ่านตัวอักษรถูก ต้องเตือนให้ไปดู CER หน้าเป็นหลักแทน
+
+    คืนอัตราส่วนความยาวบรรทัดเฉลี่ย pred/truth ถ้ามากพอจนน่าสงสัย
+    """
+    t = [ln for ln in truth_lines if ln.strip()]
+    p = [ln for ln in pred_lines if ln.strip()]
+    if len(t) < 3 or len(p) < 1:
+        return None
+    avg_t = sum(len(x) for x in t) / len(t)
+    avg_p = sum(len(x) for x in p) / len(p)
+    if not avg_t:
+        return None
+    ratio = avg_p / avg_t
+    return ratio if ratio >= 2.0 else None
+
+
+def repeated_line(lines: list[str], threshold: int = 8) -> tuple[str, int] | None:
+    """จับอาการ VLM ติดลูป — พ่นบรรทัดเดิมซ้ำจนชนเพดาน token
+
+    เอกสารจริงไม่มีหน้าไหนที่บรรทัดเดียวกันซ้ำเกิน 8 ครั้ง ถ้าเจอแปลว่าโมเดลเสีย
+    ไม่ใช่อ่านผิด ต้องบอกให้ชัดว่าผลหน้านี้ใช้เทียบไม่ได้
+    """
+    from collections import Counter
+
+    counts = Counter(ln.strip() for ln in lines if ln.strip())
+    if not counts:
+        return None
+    text, count = counts.most_common(1)[0]
+    return (text, count) if count >= threshold else None
 
 
 @st.cache_data(show_spinner=False)
@@ -306,11 +350,35 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
             badges += pill(f"{stored.core_ms / 1000:.1f}s", "good")
             st.markdown(badges, unsafe_allow_html=True)
 
+            loop = repeated_line(stored.lines)
+            if loop:
+                text, count = loop
+                st.error(
+                    f"engine นี้ติดลูป — พ่นบรรทัดเดิมซ้ำ {count} ครั้ง "
+                    f"(“{text[:50]}…”) ผลของหน้านี้ใช้เทียบไม่ได้"
+                )
+            elif merges_lines(truth_lines, stored.lines):
+                ratio = merges_lines(truth_lines, stored.lines) or 0
+                st.info(
+                    f"engine นี้รวมหลายบรรทัดเป็นก้อนเดียว (บรรทัดยาวกว่าเฉลย {ratio:.1f} เท่า) "
+                    "ค่า “อ่านครบ” จึงต่ำผิดปกติทั้งที่อ่านถูก — ให้ดู CER หน้า เป็นหลัก"
+                )
+
             for pair in score.pairs:
                 if pair.truth_index is None:
                     continue
-                if pair.score is not None:
-                    st.markdown(spans_to_html(pair.score.spans), unsafe_allow_html=True)
+                if pair.pred_index is None:
+                    # อย่าเอาข้อความเฉลยมาแสดงเฉย ๆ เพราะจะดูเหมือนผลของ OCR
+                    # ต้องบอกให้ชัดว่า engine นี้ไม่ได้อ่านบรรทัดนี้ออกมาเลย
+                    st.markdown(
+                        '<div class="gone">ไม่ได้อ่านบรรทัดนี้ '
+                        f'<span class="gonetruth">({html.escape(pair.truth[:70])})</span>'
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    continue
+                display = compare(pair.truth, pair.pred, keep_spaces=True)
+                st.markdown(spans_to_html(display.spans), unsafe_allow_html=True)
 
             if show_spurious:
                 extra = [p.pred for p in score.pairs if p.truth_index is None]
