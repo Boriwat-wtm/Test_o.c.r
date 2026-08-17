@@ -14,6 +14,8 @@ SOURCE_DIR = Path(
 
 DATA_DIR = ROOT / "data"
 IMAGE_DIR = DATA_DIR / "images"
+# ภาพชุดเดียวกันแต่ลบลายน้ำแล้ว เก็บแยกเพื่อให้เทียบผลกับชุดดิบได้
+CLEAN_IMAGE_DIR = DATA_DIR / "cleaned"
 TRUTH_DIR = DATA_DIR / "truth"
 RESULTS_DIR = ROOT / "results"
 VENDOR_DIR = ROOT / "vendor"
@@ -31,5 +33,12 @@ CACHE_DIR = VENDOR_DIR / "cache"
 
 
 def ensure_dirs() -> None:
-    for d in (IMAGE_DIR, TRUTH_DIR, RESULTS_DIR, TESSDATA_DIR, CACHE_DIR):
+    for d in (
+        IMAGE_DIR,
+        CLEAN_IMAGE_DIR,
+        TRUTH_DIR,
+        RESULTS_DIR,
+        TESSDATA_DIR,
+        CACHE_DIR,
+    ):
         d.mkdir(parents=True, exist_ok=True)

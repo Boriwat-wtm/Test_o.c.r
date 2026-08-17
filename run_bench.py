@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from thai_ocr_bench import progress, store
-from thai_ocr_bench.config import IMAGE_DIR
+from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR
 from thai_ocr_bench.engines import get_engines
 from thai_ocr_bench.render import load_pages
 from thai_ocr_bench.versions import format_snapshot, snapshot
@@ -41,7 +41,18 @@ def main() -> None:
     parser.add_argument("-e", "--engine", action="append", help="เจาะเฉพาะ engine นี้")
     parser.add_argument("--pages", type=int, help="จำกัดจำนวนหน้า")
     parser.add_argument("--redo", action="store_true", help="อ่านใหม่แม้มีผลเก่า")
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="ใช้ภาพที่ลบลายน้ำแล้ว เก็บผลแยกชื่อเป็น <engine>+clean เพื่อเทียบกับชุดดิบ",
+    )
     args = parser.parse_args()
+
+    image_dir = CLEAN_IMAGE_DIR if args.clean else IMAGE_DIR
+    suffix = "+clean" if args.clean else ""
+    if args.clean and not any(CLEAN_IMAGE_DIR.glob("*.png")):
+        print("ยังไม่มีภาพที่ลบลายน้ำ รัน clean_images.py ก่อน")
+        return
 
     pages = load_pages()
     if not pages:
@@ -69,29 +80,28 @@ def main() -> None:
 
     # เขียนสถานะให้หน้าเว็บอ่าน เพื่อโชว์แถบความคืบหน้าระหว่างรัน
     status = progress.RunStatus(
-        engines=[e.name for e in ready],
+        engines=[e.name + suffix for e in ready],
         pages_total=len(pages),
         started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
     progress.save(status)
 
     for engine in ready:
+        key = engine.name + suffix
         pending = [
-            p
-            for p in pages
-            if args.redo or p.page_id not in results.get(engine.name, {})
+            p for p in pages if args.redo or p.page_id not in results.get(key, {})
         ]
         if not pending:
-            print(f"[{engine.name}] มีผลครบแล้ว ข้าม")
-            status.done_engines.append(engine.name)
+            print(f"[{key}] มีผลครบแล้ว ข้าม")
+            status.done_engines.append(key)
             progress.save(status)
             continue
 
-        print(f"[{engine.name}] {len(pending)} หน้า")
+        print(f"[{key}] {len(pending)} หน้า")
         started = time.perf_counter()
         failures = 0
 
-        status.current_engine = engine.name
+        status.current_engine = key
         status.pages_done = 0
         status.pages_total = len(pending)
         progress.save(status)
@@ -100,8 +110,8 @@ def main() -> None:
             status.current_page = page.page_id
             progress.save(status)
 
-            result = engine.run(IMAGE_DIR / f"{page.page_id}.png", page.page_id)
-            results.setdefault(engine.name, {})[page.page_id] = store.from_result(result)
+            result = engine.run(image_dir / f"{page.page_id}.png", page.page_id)
+            results.setdefault(key, {})[page.page_id] = store.from_result(result)
             store.save(results, {"versions": snapshot()})
 
             if not result.ok:
@@ -123,7 +133,7 @@ def main() -> None:
         note = f" ({failures} หน้าพัง)" if failures else ""
         print(f"  รวม {total / 60:.1f} นาที{note}\n")
 
-        status.done_engines.append(engine.name)
+        status.done_engines.append(key)
         status.current_engine = None
         status.current_page = None
         progress.save(status)
