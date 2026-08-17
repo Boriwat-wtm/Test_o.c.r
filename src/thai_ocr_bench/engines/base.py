@@ -118,7 +118,14 @@ def load_all() -> None:
     """
     from importlib import import_module
 
-    for module in ("tesseract_tha", "easyocr_th", "paddle_th"):
+    for module in (
+        "tesseract_tha",
+        "paddle_th",
+        "easyocr_th",
+        "surya_ocr",
+        "typhoon",
+        "thai_trocr",
+    ):
         try:
             import_module(f".{module}", package=__package__)
         except Exception:  # noqa: BLE001, S110

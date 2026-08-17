@@ -27,6 +27,9 @@ TESSERACT_EXE = Path(
 )
 
 
+CACHE_DIR = VENDOR_DIR / "cache"
+
+
 def ensure_dirs() -> None:
-    for d in (IMAGE_DIR, TRUTH_DIR, RESULTS_DIR, TESSDATA_DIR):
+    for d in (IMAGE_DIR, TRUTH_DIR, RESULTS_DIR, TESSDATA_DIR, CACHE_DIR):
         d.mkdir(parents=True, exist_ok=True)
