@@ -32,6 +32,33 @@ _CACHE_VARS = {
 }
 
 
+def _load_dotenv(path: "Path | None" = None) -> None:
+    """อ่านค่าจากไฟล์ .env ที่รากโปรเจกต์ ถ้ามี
+
+    เขียนเองแทนการพึ่ง python-dotenv เพราะต้องการแค่รูปแบบ KEY=VALUE ธรรมดา
+    และอยากคุมพฤติกรรมสองข้อนี้เอง
+      - ตัวแปรที่ตั้งไว้ในระบบอยู่แล้วต้องชนะค่าในไฟล์เสมอ (ใช้ setdefault)
+      - ค่าว่างถือว่ายังไม่ได้ตั้ง ไม่ใช่ตั้งเป็นสตริงว่าง
+        เพราะไฟล์ตัวอย่างมีบรรทัด KEY= ค้างไว้ ถ้าไม่กันไว้ engine จะรายงานว่า
+        พร้อมใช้แล้วไปพังตอนเรียก API แทนที่จะบอกตั้งแต่แรกว่ายังไม่ได้ใส่คีย์
+    """
+    path = path or _ROOT / ".env"
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and value:
+            os.environ.setdefault(key, value)
+
+
+_load_dotenv()
+
+
 def _redirect_model_caches() -> None:
     """ชี้ที่เก็บโมเดลของทุกไลบรารีมาที่ vendor/cache/ ในโปรเจกต์
 
