@@ -80,8 +80,9 @@ class TyphoonApi(Engine):
         core_ms = (time.perf_counter() - started) * 1000
 
         # API คืน markdown ตัดสัญลักษณ์จัดรูปแบบออกให้เทียบกับ engine อื่นได้
+        # ต้องห่อเป็น OcrLine ไม่ใช่ str เปล่า ๆ — store.from_result() เรียก ln.text
         lines = [
-            stripped
+            OcrLine(text=stripped)
             for raw in (text or "").splitlines()
             if (stripped := _strip_markdown(raw))
         ]
