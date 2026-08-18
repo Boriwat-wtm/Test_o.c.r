@@ -31,23 +31,64 @@ st.set_page_config(page_title="ตรวจผล OCR ภาษาไทย", la
 
 CSS = """
 <style>
-  .ln     { font-size:15px; line-height:2.0; word-break:break-word; }
-  .ok     { color:var(--text-color); }
-  .wrong  { background:#f7c1c1; color:#501313; border-radius:2px; padding:0 1px; }
-  .missing{ background:#fac775; color:#412402; border-radius:2px; padding:0 1px;
-            text-decoration:underline dotted; }
-  .lab    { font-family:ui-monospace,Consolas,monospace; font-size:11px;
-            letter-spacing:.06em; text-transform:uppercase; opacity:.6; }
-  .truth  { font-size:15px; line-height:2.0; border-left:3px solid #1d3fbf;
-            padding-left:10px; }
-  .spur   { font-size:14px; line-height:1.9; opacity:.75; }
-  .gone   { font-size:14px; line-height:1.9; color:#b4342a; }
-  .gonetruth { opacity:.55; font-size:13px; }
-  .pill   { display:inline-block; font-family:ui-monospace,Consolas,monospace;
-            font-size:11px; padding:1px 7px; border-radius:3px; margin-right:5px; }
-  .good   { background:#e5f0ea; color:#2e6b4f; }
-  .warn   { background:#f8efdc; color:#8a6212; }
-  .bad    { background:#f9e9e7; color:#b4342a; }
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+
+  :root {
+    --ink: #14161B;
+    --ink-soft: #5B5F6B;
+    --surface-2: #F5F6F8;
+    --border: #E4E6EC;
+    --accent: #4F46E5;
+    --accent-soft: #EEF0FF;
+    --radius: 0.85rem;
+    --radius-sm: 0.55rem;
+    --good-bg: #E6F6EC;   --good-ink: #0E7A46;
+    --warn-bg: #FDF1DF;   --warn-ink: #93630A;
+    --bad-bg:  #FCE7EA;   --bad-ink:  #B0123B;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, "Cascadia Mono", monospace;
+  }
+
+  /* ข้อความ OCR ที่ไฮไลต์จุดผิด — line-height สูงตั้งใจ ไม่ให้สระ/วรรณยุกต์ไทยที่
+     ซ้อนกันสองชั้นถูกตัดขอบ */
+  .ln      { font-size:15.5px; line-height:2.05; word-break:break-word; margin:.1rem 0; }
+  .ok      { color:var(--ink); }
+  .wrong   { background:var(--bad-bg); color:var(--bad-ink); border-radius:4px;
+             padding:0 3px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+  .missing { background:var(--warn-bg); color:var(--warn-ink); border-radius:4px;
+             padding:0 3px; text-decoration:underline dotted; text-underline-offset:3px;
+             box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+
+  /* ป้ายชื่อหัวข้อย่อย เช่น "เฉลย" ชื่อ engine — จุดสีนำหน้าแทนเส้นคั่นเรียบ ๆ */
+  .lab { font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.09em;
+         text-transform:uppercase; color:var(--ink-soft); margin:0 0 .5rem;
+         display:flex; align-items:center; gap:.45rem; }
+  .lab::before { content:""; width:6px; height:6px; border-radius:50%;
+                 background:var(--accent); flex:none; }
+
+  /* บล็อกเฉลย — การ์ดสีอ่อนคาดขอบซ้าย เด่นแยกจากผลของ engine ทันที */
+  .truth { background:var(--accent-soft); border:1px solid #DCDCFB;
+           border-left:4px solid var(--accent); border-radius:var(--radius);
+           padding:1rem 1.15rem; font-size:15.5px; line-height:2.05; color:var(--ink); }
+
+  /* บรรทัดที่ engine ไม่ได้อ่านเลย — การ์ดจาง ไม่ใช่ตัวหนังสือแดงลอย ๆ */
+  .gone      { display:flex; gap:.5rem; align-items:baseline; background:var(--bad-bg);
+               color:var(--bad-ink); border-radius:var(--radius-sm); padding:.55rem .8rem;
+               font-size:14px; line-height:1.7; margin:.3rem 0; }
+  .gonetruth { opacity:.65; font-size:12.5px; font-weight:400; }
+
+  /* บรรทัดเกิน (ลายน้ำ/ลายเซ็น/ขยะ) */
+  .spur { background:var(--surface-2); border:1px solid var(--border);
+          border-radius:var(--radius-sm); padding:.65rem .85rem; font-size:13.5px;
+          line-height:1.85; color:var(--ink-soft); margin-top:.4rem; }
+
+  /* ป้ายตัวเลข CER / อ่านครบ / เลขไทย ฯลฯ */
+  .pill { display:inline-flex; align-items:center; font-family:var(--mono);
+          font-size:11.5px; font-weight:600; letter-spacing:.02em; line-height:1.3;
+          white-space:nowrap; padding:.3rem .7rem; border-radius:999px;
+          margin:0 .35rem .35rem 0; }
+  .good { background:var(--good-bg); color:var(--good-ink); }
+  .warn { background:var(--warn-bg); color:var(--warn-ink); }
+  .bad  { background:var(--bad-bg);  color:var(--bad-ink); }
 </style>
 """
 
@@ -168,35 +209,36 @@ def progress_banner(total_pages: int) -> None:
     engine_name = status.current_engine or "กำลังเริ่ม"
     overall = status.overall_fraction
 
-    st.markdown(
-        f"**กำลังรัน `{engine_name}`** &nbsp; "
-        f"engine ที่ {len(status.done_engines) + 1} จาก {len(status.engines)} &nbsp;·&nbsp; "
-        f"เหลืออีกประมาณ {fmt_eta(status.eta_seconds())}",
-        unsafe_allow_html=True,
-    )
-    st.progress(
-        overall,
-        text=f"รวมทั้งหมด {overall:.0%}",
-    )
-    st.progress(
-        status.engine_fraction,
-        text=(
-            f"{engine_name} — {status.pages_done}/{status.pages_total} หน้า"
-            + (
-                f" · หน้าล่าสุดใช้ {status.last_seconds:.1f}s"
-                if status.last_seconds
-                else ""
-            )
-        ),
-    )
+    with st.container(border=True):
+        st.markdown(
+            f"**กำลังรัน `{engine_name}`** &nbsp; "
+            f"engine ที่ {len(status.done_engines) + 1} จาก {len(status.engines)} &nbsp;·&nbsp; "
+            f"เหลืออีกประมาณ {fmt_eta(status.eta_seconds())}",
+            unsafe_allow_html=True,
+        )
+        st.progress(
+            overall,
+            text=f"รวมทั้งหมด {overall:.0%}",
+        )
+        st.progress(
+            status.engine_fraction,
+            text=(
+                f"{engine_name} — {status.pages_done}/{status.pages_total} หน้า"
+                + (
+                    f" · หน้าล่าสุดใช้ {status.last_seconds:.1f}s"
+                    if status.last_seconds
+                    else ""
+                )
+            ),
+        )
 
-    waiting = [
-        e
-        for e in status.engines
-        if e not in status.done_engines and e != status.current_engine
-    ]
-    if waiting:
-        st.caption("รอคิว: " + " · ".join(waiting))
+        waiting = [
+            e
+            for e in status.engines
+            if e not in status.done_engines and e != status.current_engine
+        ]
+        if waiting:
+            st.caption("รอคิว: " + " · ".join(waiting))
 
 
 def page_label(p: PageInfo) -> str:
@@ -212,10 +254,11 @@ def view_images(pages: list[PageInfo]) -> None:
     )
 
     sideways = [p for p in pages if not p.portrait]
-    a, b, c = st.columns(3)
-    a.metric("จำนวนหน้า", len(pages))
-    b.metric("ตั้งตรง", len(pages) - len(sideways))
-    c.metric("ตะแคง", len(sideways), delta=None if not sideways else "ต้องแก้")
+    with st.container(border=True):
+        a, b, c = st.columns(3)
+        a.metric("จำนวนหน้า", len(pages))
+        b.metric("ตั้งตรง", len(pages) - len(sideways))
+        c.metric("ตะแคง", len(sideways), delta=None if not sideways else "ต้องแก้")
 
     if sideways:
         st.error("หน้าที่ยังตะแคง: " + ", ".join(p.page_id for p in sideways))
@@ -224,16 +267,18 @@ def view_images(pages: list[PageInfo]) -> None:
     chosen = st.selectbox("เอกสาร", docs)
     subset = [p for p in pages if p.doc_name == chosen]
 
-    st.write(f"`/Rotate` = {subset[0].rotation}° · {len(subset)} หน้า")
+    st.caption(f"`/Rotate` = {subset[0].rotation}° · {len(subset)} หน้า")
     cols = st.columns(4)
     for i, page in enumerate(subset[:16]):
         image = IMAGE_DIR / f"{page.page_id}.png"
         if image.exists():
-            cols[i % 4].image(
-                str(image),
-                caption=f"หน้า {page.page_no} · {page.width}x{page.height}",
-                use_container_width=True,
-            )
+            with cols[i % 4]:
+                with st.container(border=True):
+                    st.image(
+                        str(image),
+                        caption=f"หน้า {page.page_no} · {page.width}x{page.height}",
+                        use_container_width=True,
+                    )
 
 
 # ── หน้า 2 ทำเฉลย ────────────────────────────────────────────────────────
@@ -251,7 +296,9 @@ def view_truth(pages: list[PageInfo], results: dict) -> None:
     left, right = st.columns([1, 1])
     image = IMAGE_DIR / f"{picked.page_id}.png"
     if image.exists():
-        left.image(str(image), use_container_width=True)
+        with left:
+            with st.container(border=True):
+                st.image(str(image), use_container_width=True)
 
     existing = truth.get(picked.page_id)
     if existing:
@@ -304,7 +351,9 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     image_col, text_col = st.columns([1, 2])
     image = IMAGE_DIR / f"{picked.page_id}.png"
     if image.exists():
-        image_col.image(str(image), use_container_width=True)
+        with image_col:
+            with st.container(border=True):
+                st.image(str(image), use_container_width=True)
 
     truth_lines = truth[picked.page_id].lines
 
@@ -314,82 +363,81 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
             '<div class="truth">' + "<br>".join(html.escape(t) for t in truth_lines) + "</div>",
             unsafe_allow_html=True,
         )
-        st.divider()
+        st.write("")
 
         for name in engines:
             stored = results.get(name, {}).get(picked.page_id)
-            st.markdown(f'<div class="lab">{html.escape(name)}</div>', unsafe_allow_html=True)
 
-            if stored is None:
-                st.caption("ยังไม่ได้อ่านหน้านี้")
-                st.divider()
-                continue
-            if not stored.ok:
-                st.error(f"พัง: {stored.error}")
-                st.divider()
-                continue
+            with st.container(border=True):
+                st.markdown(f'<div class="lab">{html.escape(name)}</div>', unsafe_allow_html=True)
 
-            score = align_lines(truth_lines, stored.lines)
-            digits = thai_digit_report("\n".join(truth_lines), "\n".join(stored.lines))
-            whole = page_cer(truth_lines, stored.lines)
+                if stored is None:
+                    st.caption("ยังไม่ได้อ่านหน้านี้")
+                    continue
+                if not stored.ok:
+                    st.error(f"พัง: {stored.error}")
+                    continue
 
-            badges = pill(f"CER บรรทัด {score.matched_cer:.1%}", cer_tone(score.matched_cer)) if score.matched_cer is not None else ""
-            if whole is not None:
-                badges += pill(f"CER หน้า {whole:.1%}", cer_tone(whole))
-            badges += pill(
-                f"อ่านครบ {score.truth_lines - score.missed_lines}/{score.truth_lines}",
-                "good" if (score.recall or 0) >= 0.95 else "bad",
-            )
-            if score.spurious_lines:
-                badges += pill(f"เกิน {score.spurious_lines} บรรทัด", "warn")
-            if digits["total"]:
-                strict = float(digits["strict"] or 0)
+                score = align_lines(truth_lines, stored.lines)
+                digits = thai_digit_report("\n".join(truth_lines), "\n".join(stored.lines))
+                whole = page_cer(truth_lines, stored.lines)
+
+                badges = pill(f"CER บรรทัด {score.matched_cer:.1%}", cer_tone(score.matched_cer)) if score.matched_cer is not None else ""
+                if whole is not None:
+                    badges += pill(f"CER หน้า {whole:.1%}", cer_tone(whole))
                 badges += pill(
-                    f"เลขไทย {strict:.0%}", "good" if strict >= 0.9 else "bad"
+                    f"อ่านครบ {score.truth_lines - score.missed_lines}/{score.truth_lines}",
+                    "good" if (score.recall or 0) >= 0.95 else "bad",
                 )
-            badges += pill(f"{stored.core_ms / 1000:.1f}s", "good")
-            st.markdown(badges, unsafe_allow_html=True)
-
-            loop = repeated_line(stored.lines)
-            if loop:
-                text, count = loop
-                st.error(
-                    f"engine นี้ติดลูป — พ่นบรรทัดเดิมซ้ำ {count} ครั้ง "
-                    f"(“{text[:50]}…”) ผลของหน้านี้ใช้เทียบไม่ได้"
-                )
-            elif merges_lines(truth_lines, stored.lines):
-                ratio = merges_lines(truth_lines, stored.lines) or 0
-                st.info(
-                    f"engine นี้รวมหลายบรรทัดเป็นก้อนเดียว (บรรทัดยาวกว่าเฉลย {ratio:.1f} เท่า) "
-                    "ค่า “อ่านครบ” จึงต่ำผิดปกติทั้งที่อ่านถูก — ให้ดู CER หน้า เป็นหลัก"
-                )
-
-            for pair in score.pairs:
-                if pair.truth_index is None:
-                    continue
-                if pair.pred_index is None:
-                    # อย่าเอาข้อความเฉลยมาแสดงเฉย ๆ เพราะจะดูเหมือนผลของ OCR
-                    # ต้องบอกให้ชัดว่า engine นี้ไม่ได้อ่านบรรทัดนี้ออกมาเลย
-                    st.markdown(
-                        '<div class="gone">ไม่ได้อ่านบรรทัดนี้ '
-                        f'<span class="gonetruth">({html.escape(pair.truth[:70])})</span>'
-                        "</div>",
-                        unsafe_allow_html=True,
+                if score.spurious_lines:
+                    badges += pill(f"เกิน {score.spurious_lines} บรรทัด", "warn")
+                if digits["total"]:
+                    strict = float(digits["strict"] or 0)
+                    badges += pill(
+                        f"เลขไทย {strict:.0%}", "good" if strict >= 0.9 else "bad"
                     )
-                    continue
-                display = compare(pair.truth, pair.pred, keep_spaces=True)
-                st.markdown(spans_to_html(display.spans), unsafe_allow_html=True)
+                badges += pill(f"{stored.core_ms / 1000:.1f}s", "good")
+                st.markdown(badges, unsafe_allow_html=True)
 
-            if show_spurious:
-                extra = [p.pred for p in score.pairs if p.truth_index is None]
-                if extra:
-                    st.markdown(
-                        '<div class="spur"><b>บรรทัดเกิน:</b> '
-                        + " · ".join(html.escape(e) for e in extra[:40])
-                        + "</div>",
-                        unsafe_allow_html=True,
+                loop = repeated_line(stored.lines)
+                if loop:
+                    text, count = loop
+                    st.error(
+                        f"engine นี้ติดลูป — พ่นบรรทัดเดิมซ้ำ {count} ครั้ง "
+                        f"(“{text[:50]}…”) ผลของหน้านี้ใช้เทียบไม่ได้"
                     )
-            st.divider()
+                elif merges_lines(truth_lines, stored.lines):
+                    ratio = merges_lines(truth_lines, stored.lines) or 0
+                    st.info(
+                        f"engine นี้รวมหลายบรรทัดเป็นก้อนเดียว (บรรทัดยาวกว่าเฉลย {ratio:.1f} เท่า) "
+                        "ค่า “อ่านครบ” จึงต่ำผิดปกติทั้งที่อ่านถูก — ให้ดู CER หน้า เป็นหลัก"
+                    )
+
+                for pair in score.pairs:
+                    if pair.truth_index is None:
+                        continue
+                    if pair.pred_index is None:
+                        # อย่าเอาข้อความเฉลยมาแสดงเฉย ๆ เพราะจะดูเหมือนผลของ OCR
+                        # ต้องบอกให้ชัดว่า engine นี้ไม่ได้อ่านบรรทัดนี้ออกมาเลย
+                        st.markdown(
+                            '<div class="gone">ไม่ได้อ่านบรรทัดนี้ '
+                            f'<span class="gonetruth">({html.escape(pair.truth[:70])})</span>'
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
+                        continue
+                    display = compare(pair.truth, pair.pred, keep_spaces=True)
+                    st.markdown(spans_to_html(display.spans), unsafe_allow_html=True)
+
+                if show_spurious:
+                    extra = [p.pred for p in score.pairs if p.truth_index is None]
+                    if extra:
+                        st.markdown(
+                            '<div class="spur"><b>บรรทัดเกิน:</b> '
+                            + " · ".join(html.escape(e) for e in extra[:40])
+                            + "</div>",
+                            unsafe_allow_html=True,
+                        )
 
 
 # ── หน้า 4 สรุปผล ────────────────────────────────────────────────────────
@@ -471,6 +519,7 @@ def view_summary(pages: list[PageInfo], results: dict) -> None:
 def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     st.title("ตรวจผล OCR ภาษาไทย")
+    st.caption("เทียบผล OCR แต่ละตัวกับเฉลยทีละบรรทัด — ไม่รัน OCR ในหน้านี้ อ่านผลจากไฟล์ที่ run_bench.py เก็บไว้เท่านั้น")
 
     pages = cached_pages()
     if not pages:
@@ -481,19 +530,23 @@ def main() -> None:
     truth = load_truth()
 
     with st.sidebar:
-        st.metric("หน้าทั้งหมด", len(pages))
-        st.metric("มีเฉลยแล้ว", len(truth))
-        st.metric("engine ที่มีผล", len(results))
-        digits_in_truth = sum(
-            t.text.count(d) for t in truth.values() for d in THAI_DIGITS
-        )
-        st.metric("เลขไทยในเฉลย", f"{digits_in_truth:,}")
+        st.markdown("**สรุปชุดข้อมูล**")
+        with st.container(border=True):
+            c1, c2 = st.columns(2)
+            c1.metric("หน้าทั้งหมด", len(pages))
+            c2.metric("มีเฉลยแล้ว", len(truth))
+            c3, c4 = st.columns(2)
+            c3.metric("engine ที่มีผล", len(results))
+            digits_in_truth = sum(
+                t.text.count(d) for t in truth.values() for d in THAI_DIGITS
+            )
+            c4.metric("เลขไทยในเฉลย", f"{digits_in_truth:,}")
         if not results:
             st.warning("ยังไม่มีผล OCR — รัน `run_bench.py`")
 
     progress_banner(len(pages))
 
-    tabs = st.tabs(["เปรียบเทียบ", "สรุปผล", "ทำเฉลย", "ตรวจภาพ"])
+    tabs = st.tabs(["🔍 เปรียบเทียบ", "📊 สรุปผล", "✏️ ทำเฉลย", "🖼️ ตรวจภาพ"])
     with tabs[0]:
         view_compare(pages, results)
     with tabs[1]:

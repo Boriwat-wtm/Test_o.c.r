@@ -1,0 +1,34 @@
+[theme]
+base = "light"
+
+primaryColor = "#4F46E5"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F6F8"
+textColor = "#14161B"
+borderColor = "#E4E6EC"
+
+baseRadius = "0.75rem"
+buttonRadius = "0.6rem"
+showWidgetBorder = true
+showSidebarBorder = true
+
+font = '"IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", "Segoe UI", sans-serif'
+headingFont = '"IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", "Segoe UI", sans-serif'
+headingFontWeights = 700
+codeFont = '"JetBrains Mono", ui-monospace, Consolas, "Cascadia Mono", monospace'
+
+linkColor = "#4F46E5"
+
+blueColor = "#2563EB"
+greenColor = "#059669"
+orangeColor = "#D97706"
+redColor = "#E11D48"
+
+codeTextColor = "#4338CA"
+codeBackgroundColor = "#F1F2F6"
+
+dataframeBorderColor = "#E4E6EC"
+dataframeHeaderBackgroundColor = "#F5F6F8"
+
+[client]
+toolbarMode = "minimal"
