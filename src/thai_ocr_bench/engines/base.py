@@ -124,6 +124,7 @@ def load_all() -> None:
         "easyocr_th",
         "surya_ocr",
         "typhoon",
+        "typhoon_api",
         "thai_trocr",
     ):
         try:
