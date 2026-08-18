@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import html
+from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
@@ -31,7 +32,11 @@ from thai_ocr_bench.viewer import (
     encode_image,
 )
 from thai_ocr_bench.thai_text import THAI_DIGITS
-from thai_ocr_bench.truth import load as load_truth, upsert as save_truth
+from thai_ocr_bench.truth import (
+    find_repeating_lines,
+    load as load_truth,
+    upsert as save_truth,
+)
 
 st.set_page_config(page_title="ตรวจผล OCR ภาษาไทย", layout="wide")
 
@@ -220,6 +225,40 @@ def repeated_line(lines: list[str], threshold: int = 8) -> tuple[str, int] | Non
 @st.cache_data(show_spinner=False)
 def cached_pages() -> list[PageInfo]:
     return load_pages()
+
+
+def drop_watermarks(results: dict) -> dict:
+    """ตัดลายน้ำและหัว/ท้ายกระดาษออกจากผลของทุก engine
+
+    เฉลยถูกกรองบรรทัดพวกนี้ออกไปแล้วตอนสร้าง (ดู truth.find_repeating_lines)
+    ถ้าไม่กรองฝั่ง OCR ด้วย ตัวที่อ่านลายน้ำเจอจะถูกลงโทษเพราะ "อ่านได้มากกว่า"
+    ซึ่งกลับหัวกลับหางกับความจริง — compare_engines.py ทำแบบนี้อยู่แล้ว
+    หน้าเว็บก็ต้องทำให้เหมือนกัน ไม่งั้นตัวเลขสองที่ไม่ตรงกัน
+
+    ตัวอย่างที่เจอจริง: Typhoon อ่านหัวกระดาษ "สำนักงานคณะกรรมการกฤษฎีกา"
+    ได้ครบทั้ง ๑๒ หน้า แล้วโดนนับเป็นบรรทัดเกินทุกหน้า
+
+    ต้องตัด boxes กับ confidences ให้ตรงตำแหน่งกันด้วย
+    ไม่งั้นกรอบที่หน้าเว็บวาดบนภาพจะเลื่อนไปคนละบรรทัด
+    """
+    cleaned: dict = {}
+    for engine, pages in results.items():
+        dropped = find_repeating_lines({pid: p.lines for pid, p in pages.items()})
+        if not dropped:
+            cleaned[engine] = pages
+            continue
+        cleaned[engine] = {}
+        for pid, page in pages.items():
+            keep = [i for i, ln in enumerate(page.lines) if ln.strip() not in dropped]
+            cleaned[engine][pid] = replace(
+                page,
+                lines=[page.lines[i] for i in keep],
+                boxes=[page.boxes[i] for i in keep if i < len(page.boxes)],
+                confidences=[
+                    page.confidences[i] for i in keep if i < len(page.confidences)
+                ],
+            )
+    return cleaned
 
 
 def fmt_eta(seconds: float | None) -> str:
@@ -646,7 +685,7 @@ def main() -> None:
         st.error("ยังไม่มีภาพ — รัน `render_pages.py` ก่อน")
         return
 
-    results = store.load()
+    results = drop_watermarks(store.load())
     truth = load_truth()
 
     with st.sidebar:

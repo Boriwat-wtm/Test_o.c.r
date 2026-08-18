@@ -11,6 +11,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Literal
 
+from rapidfuzz import fuzz
 from rapidfuzz.distance import Levenshtein
 
 from .thai_text import CHAR_CLASSES, classify_char, normalize, thai_to_arabic_digits
@@ -164,6 +165,141 @@ class PageScore:
         return (self.truth_lines - self.missed_lines) / self.truth_lines
 
 
+def _index_map(src: str, dest: str) -> list[int]:
+    """ตารางแปลงตำแหน่งในสตริงหนึ่งไปเป็นตำแหน่งในอีกสตริง (ยาว len(src)+1)
+
+    ใช้ opcodes ของ Levenshtein เป็นโครง แล้วเกลี่ยตำแหน่งภายในแต่ละช่วงตามสัดส่วน
+    ไม่ต้องแม่นระดับตัวอักษร เพราะเอาไปใช้หาจุด "ตัดบรรทัด" เท่านั้น
+    คลาดไปหนึ่งสองตัวก็ยังตัดถูกที่ และคะแนนจริงคำนวณใหม่จากข้อความดิบอยู่ดี
+    """
+    table = [0] * (len(src) + 1)
+    for op in Levenshtein.opcodes(src, dest):
+        span_src = op.src_end - op.src_start
+        span_dest = op.dest_end - op.dest_start
+        for k in range(op.src_start, op.src_end):
+            offset = k - op.src_start
+            shift = round(offset * span_dest / span_src) if span_src else 0
+            table[k] = op.dest_start + shift
+        table[op.src_end] = op.dest_end
+    table[len(src)] = len(dest)
+    return table
+
+
+def split_by_truth(truth_group: list[str], pred: str) -> list[str]:
+    """หั่นบรรทัดเดียวของ OCR กลับเป็นหลายท่อน ให้ตรงกับบรรทัดในเฉลย
+
+    VLM คืนย่อหน้าเป็นก้อนเดียว แต่ในภาพมันคือหลายบรรทัด
+    ถ้าไม่หั่นกลับ หน้าเว็บจะเทียบก้อนยาวกับบรรทัดสั้นแล้วขึ้นแดงทั้งแถบ
+    ทั้งที่อ่านถูกทุกตัว หั่นแล้วผู้ใช้กวาดตาเทียบกับรูปทีละบรรทัดได้เหมือนเดิม
+    """
+    keep = [k for k, ch in enumerate(pred) if not ch.isspace()]
+    dense = "".join(pred[k] for k in keep)
+    parts = [normalize(t) for t in truth_group]
+    joined = "".join(parts)
+    if not joined or not dense:
+        return [pred] + [""] * (len(truth_group) - 1)
+
+    table = _index_map(joined, dense)
+    cuts = []
+    acc = 0
+    for part in parts[:-1]:
+        acc += len(part)
+        dense_pos = table[acc]
+        cuts.append(keep[dense_pos] if dense_pos < len(keep) else len(pred))
+
+    out = []
+    start = 0
+    for cut in [*cuts, len(pred)]:
+        cut = max(cut, start)
+        out.append(pred[start:cut].strip())
+        start = cut
+    return out
+
+
+def _attach_merged_truth(
+    norm_truth: list[str],
+    norm_pred: list[str],
+    matches: dict[int, int],
+    used_truth: set[int],
+    *,
+    min_score: float = 80.0,
+) -> dict[int, list[int]]:
+    """หาบรรทัดเฉลยที่ไปรวมอยู่ในก้อนเดียวกับบรรทัดอื่นของ OCR
+
+    คืน {ดัชนีบรรทัด OCR: [ดัชนีบรรทัดเฉลยทุกบรรทัดที่ก้อนนั้นครอบคลุม]}
+
+    ทำไมการจับคู่หนึ่งต่อหนึ่งอย่างเดียวไม่พอ
+      normalized_similarity หารด้วยความยาวของสตริงที่ยาวกว่า พอ OCR รวมห้าบรรทัด
+      เป็นย่อหน้าเดียวยาว ๕๐๐ ตัว เทียบกับเฉลยบรรทัดเดียวยาว ๙๐ ตัว
+      ค่าจะตกไปราว ๐.๑๘ ต่ำกว่า threshold ทั้งที่ข้อความอยู่ครบทุกตัว
+      บรรทัดพวกนั้นจึงถูกนับว่า "OCR ไม่ได้อ่าน" ซึ่งผิดความจริง
+
+    จึงใช้ partial_ratio แทนสำหรับกรณีนี้ — มันหาช่วงย่อยใน OCR ที่ตรงกับเฉลยที่สุด
+    ความยาวส่วนเกินจึงไม่ถูกนำมาหาร ตอบคำถามที่ถูกต้องว่า
+    "บรรทัดนี้อยู่ในก้อนนั้นไหม" ไม่ใช่ "สองสตริงนี้เหมือนกันไหม"
+    """
+    picked: dict[int, int] = {}
+    for ti, truth in enumerate(norm_truth):
+        if ti in used_truth or not truth:
+            continue
+        best_pi, best_score = None, min_score
+        for pi, pred in enumerate(norm_pred):
+            if len(pred) <= len(truth) * 1.3:  # ไม่ใช่ก้อนรวม ข้าม
+                continue
+            score = fuzz.partial_ratio(truth, pred, score_cutoff=best_score)
+            if score > best_score:
+                best_pi, best_score = pi, score
+        if best_pi is not None:
+            picked[ti] = best_pi
+            used_truth.add(ti)
+
+    _snap_to_neighbours(picked, matches, norm_truth, norm_pred, min_score)
+
+    extra: dict[int, list[int]] = {}
+    for ti, pi in picked.items():
+        extra.setdefault(pi, []).append(ti)
+
+    # ดึงบรรทัดที่จับคู่ไว้ตั้งแต่รอบแรกเข้ากลุ่มเดียวกันด้วย
+    # ก้อนหนึ่งมักครอบทั้งบรรทัดที่แมตช์แล้วและบรรทัดที่ยังไม่แมตช์ปนกัน
+    # ต้องหั่นพร้อมกันทั้งกลุ่ม ไม่งั้นจุดตัดจะเหลื่อม
+    for ti, pi in matches.items():
+        if pi in extra:
+            extra[pi].append(ti)
+    return {pi: sorted(set(tis)) for pi, tis in extra.items()}
+
+
+def _snap_to_neighbours(
+    picked: dict[int, int],
+    matches: dict[int, int],
+    norm_truth: list[str],
+    norm_pred: list[str],
+    min_score: float,
+) -> None:
+    """ย้ายบรรทัดที่หลุดไปเกาะก้อนผิด ให้กลับไปอยู่ก้อนเดียวกับบรรทัดข้างเคียง
+
+    partial_ratio มองหาข้อความย่อยที่ไหนก็ได้ในก้อน จุดอ่อนคือบรรทัดสั้น ๆ
+    อย่าง "กฎกระทรวง" หรือ "และ" ไปเจอตัวเองในย่อหน้าอื่นที่ไม่เกี่ยวกันแล้วได้ ๑๐๐ เต็ม
+    ผลคือหางของย่อหน้าถูกดึงไปคนละที่ แล้วจุดตัดของทั้งกลุ่มเลื่อนตามไปด้วย
+
+    ข้อความที่อยู่ติดกันในเฉลยย่อมอยู่ก้อนเดียวกัน ใช้ข้อเท็จจริงนี้แก้
+    ถ้าบรรทัดหนึ่งไปอยู่คนละก้อนกับทั้งบรรทัดบนและล่าง ให้ย้ายไปอยู่กับเพื่อนบ้าน
+    เท่าที่คะแนนยังผ่านเกณฑ์เดิม
+    """
+    where = {**matches, **picked}
+    for ti in sorted(picked):
+        here = picked[ti]
+        around = {where.get(ti - 1), where.get(ti + 1)} - {None, here}
+        if not around or here in (where.get(ti - 1), where.get(ti + 1)):
+            continue
+        best_pi, best_score = None, min_score
+        for pi in around:
+            score = fuzz.partial_ratio(norm_truth[ti], norm_pred[pi])
+            if score > best_score:
+                best_pi, best_score = pi, score
+        if best_pi is not None:
+            picked[ti] = where[ti] = best_pi
+
+
 def align_lines(
     truth_lines: list[str],
     pred_lines: list[str],
@@ -176,6 +312,11 @@ def align_lines(
       1. OCR แต่ละตัวลำดับการอ่านไม่เหมือนกัน ต่อเป็นก้อนแล้วเทียบจะเพี้ยนทั้งที่อ่านถูก
       2. ตัวที่อ่านลายน้ำหรือลายเซ็นเจอ จะถูกลงโทษหนักเกินจริงเพราะมีตัวอักษรเกิน
          ทั้งที่ความผิดจริงคือ "ตรวจเจอสิ่งที่ไม่ควรเจอ" ไม่ใช่ "อ่านตัวอักษรผิด"
+
+    รองรับกรณีจับคู่แบบหลายต่อหนึ่งด้วย เพราะ VLM คืนย่อหน้าเป็นก้อนเดียว
+    ไม่แบ่งตามบรรทัดในภาพ ถ้าจับคู่แบบหนึ่งต่อหนึ่งอย่างเดียว ก้อนนั้นจะแมตช์
+    เฉลยได้แค่บรรทัดแรก ที่เหลือถูกนับว่า "ไม่ได้อ่าน" ทั้งที่ข้อความอยู่ครบ
+    (วัดจริงกับ Typhoon: รายงานว่าอ่านได้ ๙/๓๔ บรรทัด ทั้งที่ CER ทั้งหน้า ๐.๐๔%)
 
     แยกรายงานสามอย่างจึงตรงกับความจริงกว่า
       matched_cer      อ่านตัวอักษรแม่นแค่ไหน (เฉพาะบรรทัดที่จับคู่ได้)
@@ -208,6 +349,27 @@ def align_lines(
         used_truth.add(ti)
         used_pred.add(pi)
 
+    groups = _attach_merged_truth(norm_truth, norm_pred, matches, used_truth)
+
+    # หั่นก้อนที่ OCR รวมมา กลับเป็นทีละบรรทัดตามเฉลย
+    segments: dict[int, str] = {}
+    for pi, members in groups.items():
+        # ตรวจทั้งกลุ่มอีกชั้นก่อนเชื่อ: เอาเฉลยทุกบรรทัดในกลุ่มมาต่อกัน
+        # แล้วต้องใกล้เคียงกับก้อนของ OCR ทั้งก้อน ไม่ใช่แค่บางช่วง
+        #
+        # ด่านนี้จำเป็นเพราะ partial_ratio ตอบแค่ว่า "บรรทัดนี้โผล่ในก้อนไหม"
+        # ตัวที่แบ่งบรรทัดตามภาพอยู่แล้วอย่าง Tesseract หรือ PaddleOCR
+        # อาจมีบรรทัดสั้น ๆ ที่บังเอิญไปโผล่ในก้อนยาวของบรรทัดอื่น
+        # ถ้าไม่กันไว้ บรรทัดที่ OCR ไม่ได้อ่านจริงจะถูกนับว่าอ่านได้ ทำให้คะแนนสวยเกินจริง
+        joined = "".join(norm_truth[m] for m in members)
+        if Levenshtein.normalized_similarity(joined, norm_pred[pi]) < 0.7:
+            continue
+        used_pred.add(pi)
+        pieces = split_by_truth([truth_lines[m] for m in members], pred_lines[pi])
+        for ti, piece in zip(members, pieces):
+            segments[ti] = piece
+            matches[ti] = pi
+
     page = PageScore(truth_lines=sum(1 for t in norm_truth if t))
 
     for ti, truth_line in enumerate(truth_lines):
@@ -215,9 +377,10 @@ def align_lines(
             continue
         if ti in matches:
             pi = matches[ti]
-            score = compare(truth_line, pred_lines[pi])
+            pred_line = segments.get(ti, pred_lines[pi])
+            score = compare(truth_line, pred_line)
             page.matched.append(score)
-            page.pairs.append(LinePair(ti, pi, truth_line, pred_lines[pi], score))
+            page.pairs.append(LinePair(ti, pi, truth_line, pred_line, score))
         else:
             page.missed_lines += 1
             page.missed_chars += len(norm_truth[ti])

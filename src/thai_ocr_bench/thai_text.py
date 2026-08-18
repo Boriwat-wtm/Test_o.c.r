@@ -44,6 +44,31 @@ _MARK_RANK: dict[str, int] = {
 THAI_DIGITS = "๐๑๒๓๔๕๖๗๘๙"
 _THAI_TO_ARABIC = str.maketrans(THAI_DIGITS, "0123456789")
 
+# ── ตัวอักษรที่หน้าตาต่างกันแต่ความหมายเดียวกัน ────────────────────────
+# ต้นฉบับใช้อัญประกาศโค้ง (“ ”) ส่วน VLM อย่าง Typhoon คืนอัญประกาศตรง (")
+# ถ้าไม่ยุบให้เหมือนกันก่อน จะถูกนับเป็นอ่านผิดทั้งที่อ่านถูก — หน้าเดียวโดนไป ๓๐ จุด
+# ยุบทั้งสองฝั่งเสมอ จึงไม่มี engine ไหนได้เปรียบ
+#
+# เลขยกกำลัง (¹ ⁰) จงใจแปลงเป็นเลขอารบิก ไม่ใช่เลขไทย
+# เพราะ Typhoon อ่านเลขเชิงอรรถที่เป็นเลขไทยยกกำลัง (๑๐) ออกมาเป็น ¹⁰
+# ซึ่งเป็น "ค่าถูกแต่ไม่ใช่เลขไทย" แปลงแบบนี้การวัดจะรายงานตรงความจริง
+# strict ตก (เสียความเป็นเลขไทย) แต่ lenient ผ่าน (ค่ากู้คืนได้)
+# เหมือนกรณี PaddleOCR ที่พ่นเลขอารบิกออกมา
+_TYPOGRAPHY = str.maketrans(
+    {
+        **dict.fromkeys("“”„‟«»", '"'),
+        **dict.fromkeys("‘’‚‛", "'"),
+        **dict.fromkeys("‐‑‒–—―−", "-"),
+        **dict(zip("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")),
+        **dict(zip("₀₁₂₃₄₅₆₇₈₉", "0123456789")),
+    }
+)
+
+
+def fold_typography(text: str) -> str:
+    """ยุบอักขระที่ต่างกันแค่รูปแบบการพิมพ์ให้เหลือรูปเดียว"""
+    return text.translate(_TYPOGRAPHY)
+
 _SARA_AM = "ำ"  # ำ
 _NIKHAHIT = "ํ"  # ํ
 _SARA_AA = "า"  # า
@@ -116,6 +141,7 @@ def normalize(text: str, *, keep_spaces: bool = False) -> str:
     ลำดับสำคัญ: ต้องรวม ำ ก่อนเรียงลำดับ ไม่งั้นนิคหิตจะถูกย้ายออกจากสระอา
     """
     text = unicodedata.normalize("NFC", text)
+    text = fold_typography(text)
     text = compose_sara_am(text)
     text = reorder_marks(text)
     text = drop_duplicate_marks(text)
