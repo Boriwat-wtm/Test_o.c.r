@@ -111,6 +111,16 @@ CSS = """
   .good { background:var(--good-bg); color:var(--good-ink); }
   .warn { background:var(--warn-bg); color:var(--warn-ink); }
   .bad  { background:var(--bad-bg);  color:var(--bad-ink); }
+
+  /* คอลัมน์ภาพ+เฉลยในแท็บเปรียบเทียบ ลอยติดจอขณะเลื่อนดูรายการ engine
+     st.container(key="compare_pin") ทำให้ Streamlit ใส่คลาสนี้ให้เอง */
+  .st-key-compare_pin {
+    position: sticky;
+    top: .75rem;
+    align-self: flex-start;
+    max-height: calc(100vh - 1.5rem);
+    overflow-y: auto;
+  }
 </style>
 """
 
@@ -382,20 +392,22 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
 
     image_col, text_col = st.columns([1, 2])
     image = IMAGE_DIR / f"{picked.page_id}.png"
-    if image.exists():
-        with image_col:
-            with st.container(border=True):
-                st.image(str(image), use_container_width=True)
-
     truth_lines = truth[picked.page_id].lines
 
+    # ภาพต้นฉบับ + เฉลยอยู่ในการ์ดเดียวกัน ลอยติดจอขณะเลื่อนดู engine ทางขวา
+    # (ไม่งั้นต้องเลื่อนขึ้นไปดูต้นฉบับทุกครั้งที่อยากเทียบ)
+    with image_col:
+        with st.container(key="compare_pin"):
+            if image.exists():
+                with st.container(border=True):
+                    st.image(str(image), use_container_width=True)
+            st.markdown('<div class="lab" style="margin-top:.9rem;">เฉลย</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="truth">' + "<br>".join(html.escape(t) for t in truth_lines) + "</div>",
+                unsafe_allow_html=True,
+            )
+
     with text_col:
-        st.markdown('<div class="lab">เฉลย</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="truth">' + "<br>".join(html.escape(t) for t in truth_lines) + "</div>",
-            unsafe_allow_html=True,
-        )
-        st.write("")
 
         for name in engines:
             stored = results.get(name, {}).get(picked.page_id)
