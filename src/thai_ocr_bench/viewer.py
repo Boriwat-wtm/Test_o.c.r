@@ -373,13 +373,19 @@ function render() {
     : '';
   tabsEl.style.display = mode === 'single' ? 'flex' : 'none';
 
-  if (!DATA.engines.length) { scrollEl.innerHTML = truthCard() +
-    '<div class="empty">ยังไม่มีผลของ engine ใดในหน้านี้</div>'; return; }
+  if (!DATA.engines.length) {
+    scrollEl.innerHTML =
+      '<div class="empty">ยังไม่มีผลของ engine ใดในหน้านี้</div>' + truthCard();
+    return;
+  }
 
+  // เฉลยอยู่ล่างสุด — ผลของ engine ที่กำลังตรวจควรอยู่ใกล้ขอบบนมากที่สุด
+  // เพราะเป็นสิ่งที่ต้องกวาดสายตาเทียบกับรูปฝั่งซ้ายตลอดเวลา
   scrollEl.innerHTML = mode === 'single'
-    ? truthCard() + engineCard(DATA.engines[active])
-    : truthCard() + `<div class="cols">` +
-        DATA.engines.map(e => `<div>${engineCard(e)}</div>`).join('') + `</div>`;
+    ? engineCard(DATA.engines[active]) + truthCard()
+    : `<div class="cols">` +
+        DATA.engines.map(e => `<div>${engineCard(e)}</div>`).join('') +
+      `</div>` + truthCard();
 }
 
 tabsEl.onclick = e => {
