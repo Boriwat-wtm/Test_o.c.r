@@ -53,10 +53,32 @@ CSS = """
   .ln      { font-size:15.5px; line-height:2.05; word-break:break-word; margin:.1rem 0; }
   .ok      { color:var(--ink); }
   .wrong   { background:var(--bad-bg); color:var(--bad-ink); border-radius:4px;
-             padding:0 3px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+             padding:0 3px; box-decoration-break:clone; -webkit-box-decoration-break:clone;
+             position:relative; cursor:help; }
   .missing { background:var(--warn-bg); color:var(--warn-ink); border-radius:4px;
              padding:0 3px; text-decoration:underline dotted; text-underline-offset:3px;
-             box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+             box-decoration-break:clone; -webkit-box-decoration-break:clone;
+             position:relative; cursor:help; }
+
+  /* ทูลทิปตอนชี้เมาส์ที่จุดผิด/ตกหล่น — โผล่ลอยเหนือคำ ไม่ดันเนื้อหาข้างเคียง */
+  .wrong::after, .missing::after {
+    content:attr(data-tip); position:absolute; left:50%; bottom:calc(100% + 8px);
+    transform:translateX(-50%) translateY(4px); background:var(--ink); color:#F5F6F8;
+    font-size:12.5px; font-weight:500; line-height:1.55; padding:.4rem .65rem;
+    border-radius:8px; white-space:normal; max-width:260px; width:max-content;
+    box-shadow:0 6px 16px rgba(20,22,27,.22); opacity:0; visibility:hidden;
+    pointer-events:none; transition:opacity .12s ease, transform .12s ease; z-index:60;
+  }
+  .wrong::before, .missing::before {
+    content:""; position:absolute; left:50%; bottom:100%;
+    transform:translateX(-50%) translateY(4px); border:5px solid transparent;
+    border-top-color:var(--ink); opacity:0; visibility:hidden; pointer-events:none;
+    transition:opacity .12s ease; z-index:60;
+  }
+  .wrong:hover::after, .missing:hover::after,
+  .wrong:hover::before, .missing:hover::before {
+    opacity:1; visibility:visible; transform:translateX(-50%) translateY(0);
+  }
 
   /* ป้ายชื่อหัวข้อย่อย เช่น "เฉลย" ชื่อ engine — จุดสีนำหน้าแทนเส้นคั่นเรียบ ๆ */
   .lab { font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.09em;
@@ -95,17 +117,27 @@ CSS = """
 
 # ── ตัวช่วยแสดงผล ────────────────────────────────────────────────────────
 def spans_to_html(spans: list[Span]) -> str:
-    """แปลงผลการเทียบเป็น HTML ระบายสี — แดงคืออ่านผิด เหลืองคือตกหล่น"""
+    """แปลงผลการเทียบเป็น HTML ระบายสี — แดงคืออ่านผิด เหลืองคือตกหล่น
+
+    ใช้ data-tip + CSS แทน title ของเบราว์เซอร์ เพราะ title มีดีเลย์ก่อนขึ้น
+    และสไตล์ตามแต่ระบบปฏิบัติการ ควบคุมหน้าตาให้เข้าธีมไม่ได้
+    """
     out = []
     for span in spans:
         text = html.escape(span.text) or "␣"
         if span.kind == "ok":
             out.append(f'<span class="ok">{text}</span>')
         elif span.kind == "wrong":
-            tip = f" (เฉลย: {html.escape(span.expected)})" if span.expected else ""
-            out.append(f'<span class="wrong" title="อ่านผิด{tip}">{text}</span>')
+            tip = (
+                f"ควรเป็น: {html.escape(span.expected)}"
+                if span.expected
+                else "ส่วนเกิน — ไม่มีในเฉลย"
+            )
+            out.append(f'<span class="wrong" data-tip="{tip}">{text}</span>')
         else:
-            out.append(f'<span class="missing" title="ตกหล่น">{text}</span>')
+            out.append(
+                f'<span class="missing" data-tip="ตกหล่น — engine ไม่ได้อ่านส่วนนี้">{text}</span>'
+            )
     return f'<div class="ln">{"".join(out)}</div>'
 
 
