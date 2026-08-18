@@ -1,0 +1,339 @@
+"""หาจุดที่ OCR น่าจะอ่านผิด โดยไม่ต้องมีเฉลย
+
+ทำไมต้องมีโมดูลนี้ทั้งที่มีเฉลยอยู่แล้ว
+  เฉลยมีแค่ ๕๔ หน้าจาก ๖๖ หน้า และเอกสารชุดหน้าจะไม่มีเฉลยเลย
+  ถ้าตรวจได้เฉพาะตอนมีเฉลย เครื่องมือนี้ก็ใช้กับงานจริงไม่ได้
+
+สองชั้น เรียงตามความเสี่ยงจากน้อยไปมาก
+  ชั้นกฎตายตัว   ตัดสินได้โดยไม่ต้องตีความ — เลขยกกำลัง เลขอารบิกในเอกสารเลขไทย
+  ชั้นโหวต       engine คนละตระกูลตั้งแต่สองตัวขึ้นไปอ่านได้ไม่ตรงกับตัวนี้
+
+วัดจริงกับ ๑๒ หน้า (๓๗๒ บรรทัด ผิดจริง ๑๔ บรรทัด)
+
+  engine                จับได้     เตือนผิด   ต้องตรวจ
+  typhoon-api-num        ๙/๑๔        ๑๒        ๕.๖%
+  paddle-th            ๔๙/๖๙          ๖       ๒๒.๐%
+  tesseract-tha      ๑๒๑/๑๕๒          ๒       ๓๔.๔%
+  easyocr-th         ๑๗๗/๒๑๐          ๗       ๕๑.๗%
+
+สัดส่วนที่ต้องตรวจแปรตามความแม่นของ engine ตามที่ควรเป็น
+ตัวที่อ่านผิดเยอะย่อมมีจุดน่าสงสัยเยอะ ไม่ใช่ข้อบกพร่องของตัวคัด
+
+ที่ลองแล้วไม่ผ่าน จึงไม่อยู่ในไฟล์นี้
+  - ตรวจด้วยพจนานุกรมไทย (PyThaiNLP newmm)
+    ไทยไม่เว้นวรรคระหว่างคำ พอ OCR อ่านผิดมักได้คำที่มีจริงแต่แบ่งคนละแบบ
+    'มาตรา' -> 'มา'+'รา'  และ  'กรรมสิทธิ์' -> 'กรรม'+'สิทธิ'  ทุกชิ้นเป็นคำจริง
+    วัดทั้งชุดแล้วเตือนผิด ๗ จับได้ ๑ — แย่กว่าไม่ทำ
+  - โหวตข้ามเครื่องระดับบรรทัด
+    ผิดตัวเดียวในบรรทัดยาว ๙๐ ตัว ค่าความคล้ายแทบไม่ขยับ จับได้ ๐ จาก ๑๔
+"""
+
+from __future__ import annotations
+
+import re
+from collections import Counter
+from dataclasses import dataclass, field
+
+from rapidfuzz.distance import Levenshtein
+
+from .metrics import index_map
+from .thai_text import THAI_DIGITS, normalize
+
+Box = tuple[int, int, int, int]
+
+# ── ชั้นที่ ๐ : กฎตายตัว ────────────────────────────────────────────────
+
+_SUPERSCRIPT = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+_SUP_TO_THAI = str.maketrans(_SUPERSCRIPT, THAI_DIGITS)
+_ARABIC_TO_THAI = str.maketrans("0123456789", THAI_DIGITS)
+
+_SUP_RUN = re.compile(f"[{_SUPERSCRIPT}]+")
+_ARABIC_RUN = re.compile(r"[0-9]+")
+
+
+def thai_digit_document(lines: list[str], ratio: float = 4.0) -> bool:
+    """เอกสารนี้ใช้เลขไทยเป็นหลักหรือไม่
+
+    ต้องรู้ก่อนจึงจะบอกได้ว่าเลขอารบิกที่โผล่มาคือของแปลกปลอม
+    ถ้าเอกสารใช้เลขอารบิกอยู่แล้ว การไปเตือนทุกตัวเลขจะกลายเป็นเสียงรบกวน
+    """
+    text = "".join(lines)
+    thai = sum(text.count(d) for d in THAI_DIGITS)
+    arabic = sum(text.count(d) for d in "0123456789")
+    return thai >= 10 and thai > arabic * ratio
+
+
+def rule_findings(line: str, *, thai_doc: bool) -> list[tuple[int, int, str, str]]:
+    """หาจุดที่กฎตายตัวจับได้ในบรรทัดเดียว
+
+    คืนรายการ (เริ่ม, จบ, สิ่งที่ควรเป็น, เหตุผล)
+
+    กฎทั้งหมดในนี้ต้องเป็นเรื่องที่ตัดสินได้โดยไม่ต้องอ่านความหมาย
+    ถ้าเริ่มต้องเดาว่าประโยคนี้ควรพูดว่าอะไร แปลว่าไม่ใช่ที่ของกฎ ให้ไปอยู่ชั้นอื่น
+    """
+    out: list[tuple[int, int, str, str]] = []
+
+    # เลขยกกำลัง: Typhoon อ่านเลขเชิงอรรถที่เป็นเลขไทยยกกำลังออกมาเป็น ¹⁰
+    # ค่าถูกแต่เสียความเป็นเลขไทย ซึ่งเป็นสิ่งที่งานนี้วัดโดยตรง
+    for m in _SUP_RUN.finditer(line):
+        out.append((m.start(), m.end(), m.group().translate(_SUP_TO_THAI),
+                    "เลขยกกำลัง — ควรเป็นเลขไทย"))
+
+    # เลขอารบิกในเอกสารที่ใช้เลขไทยล้วน
+    if thai_doc:
+        for m in _ARABIC_RUN.finditer(line):
+            out.append((m.start(), m.end(), m.group().translate(_ARABIC_TO_THAI),
+                        "เลขอารบิกในเอกสารเลขไทย"))
+    return out
+
+
+# ── ชั้นที่ ๒ : โหวตข้ามเครื่องระดับตัวอักษร ───────────────────────────
+
+def cross_engine_findings(
+    line: str,
+    peers: list[str],
+    *,
+    min_votes: int = 2,
+) -> list[tuple[int, int, str, str]]:
+    """หาช่วงที่ engine อื่นตั้งแต่สองตัวขึ้นไปเห็นตรงกันว่าควรเป็นอย่างอื่น
+
+    ต้องเทียบระดับตัวอักษร ไม่ใช่ระดับบรรทัด
+    วัดแล้ว: เทียบทั้งบรรทัดจับได้ ๐ จาก ๑๔ เพราะผิดตัวเดียวในบรรทัด ๙๐ ตัว
+    ค่าความคล้ายขยับไม่ถึง ๒% ซึ่งจมอยู่ในความต่างปกติระหว่าง engine
+
+    ใช้ opcodes ของ Levenshtein แทนที่จะเทียบตำแหน่งตรง ๆ
+    เพราะแต่ละ engine ใส่ช่องว่างและตกหล่นไม่เท่ากัน ตำแหน่งจึงเลื่อนกันเสมอ
+    """
+    if len(peers) < min_votes:
+        return []
+
+    votes: Counter[tuple[int, int, str]] = Counter()
+    for peer in peers:
+        for op in Levenshtein.opcodes(line, peer):
+            if op.tag != "equal":
+                votes[(op.src_start, op.src_end, peer[op.dest_start:op.dest_end])] += 1
+
+    return [
+        (start, end, says, f"engine อื่น {n} ตัวอ่านได้เป็นอย่างอื่น")
+        for (start, end, says), n in votes.items()
+        if n >= min_votes
+    ]
+
+
+# ── รวมผลของทุกชั้น ────────────────────────────────────────────────────
+
+@dataclass
+class Finding:
+    """จุดเดียวที่น่าสงสัย ภายในบรรทัดหนึ่ง"""
+
+    start: int
+    end: int
+    text: str  # สิ่งที่ engine อ่านได้ตรงช่วงนี้
+    suggestion: str  # สิ่งที่กฎหรือเสียงข้างมากบอกว่าควรเป็น
+    reason: str
+    layer: str  # "rule" หรือ "vote"
+
+
+@dataclass
+class Suspect:
+    """บรรทัดหนึ่งที่มีจุดน่าสงสัยอย่างน้อยหนึ่งจุด"""
+
+    page_id: str
+    engine: str
+    # ดัชนีบน "กริด" ไม่ใช่ดัชนีในผลของ engine ตัวนี้ — สองอย่างนี้ไม่ตรงกัน
+    # VLM รวมย่อหน้าเป็นบรรทัดเดียว เลขบรรทัดของมันจึงคนละระบบกับบรรทัดในภาพ
+    # ห้ามเอาไปเขียนทับ lines[grid_line] ของ engine เด็ดขาด จะทับผิดบรรทัด
+    # ถ้าจะแก้ผลกลับ ให้แทนที่ด้วยข้อความ (text) ไม่ใช่ด้วยดัชนี
+    grid_line: int
+    # ส่วนของบรรทัดในภาพนี้ ตามที่ engine เป้าหมายอ่านได้
+    text: str
+    findings: list[Finding] = field(default_factory=list)
+    # พิกัดบนภาพ ยืมมาจาก engine อื่นได้ถ้าตัวนี้ไม่คืนพิกัด
+    box: Box | None = None
+    box_from: str | None = None
+
+    @property
+    def layers(self) -> set[str]:
+        return {f.layer for f in self.findings}
+
+
+def merge_boxes(boxes: list[Box]) -> Box | None:
+    """รวมกล่องหลายใบเป็นใบเดียวที่ครอบทุกใบ
+
+    เอา engine หลายตัวมาช่วยกันชี้ตำแหน่ง แล้วเอากรอบที่ครอบทั้งหมด
+    เพราะแต่ละตัวตีกรอบไม่เท่ากัน ครอบเผื่อไว้ปลอดภัยกว่าครอปขาด
+    """
+    boxes = [b for b in boxes if b]
+    if not boxes:
+        return None
+    x = min(b[0] for b in boxes)
+    y = min(b[1] for b in boxes)
+    x2 = max(b[0] + b[2] for b in boxes)
+    y2 = max(b[1] + b[3] for b in boxes)
+    return (x, y, x2 - x, y2 - y)
+
+
+def find_in_line(
+    line: str,
+    peers: list[str],
+    *,
+    thai_doc: bool,
+) -> list[Finding]:
+    """รันทุกชั้นกับบรรทัดเดียว แล้วคืนจุดน่าสงสัยทั้งหมด"""
+    found: list[Finding] = []
+
+    for start, end, fix, why in rule_findings(line, thai_doc=thai_doc):
+        found.append(Finding(start, end, line[start:end], fix, why, "rule"))
+
+    # ชั้นโหวตต้องเทียบบนข้อความที่จัดรูปแล้ว ไม่งั้นความต่างที่ไม่ใช่การอ่านผิด
+    # (ช่องว่าง ลำดับวรรณยุกต์ สระอำที่เขียนแยกส่วน) จะกลายเป็นเสียงเตือนปลอม
+    # แต่ตำแหน่งที่ได้เป็นของข้อความหลังจัดรูป ต้องแปลงกลับเป็นตำแหน่งจริง
+    # ก่อนเอาไปไฮไลต์บนหน้าเว็บ ไม่งั้นขีดเส้นใต้ผิดตัว
+    dense = normalize(line)
+    dense_peers = [n for p in peers if (n := normalize(p))]
+    back = index_map(dense, line)
+
+    for start, end, says, why in cross_engine_findings(dense, dense_peers):
+        real_start, real_end = back[start], back[min(end, len(dense))]
+        if real_end <= real_start:
+            real_end = min(real_start + 1, len(line))
+        found.append(
+            Finding(real_start, real_end, line[real_start:real_end], says, why, "vote")
+        )
+
+    return sorted(found, key=lambda f: (f.start, f.end))
+
+
+def engine_family(name: str) -> str:
+    """ชื่อตระกูลของ engine — ส่วนหน้าสุดก่อนขีดแรก
+
+    typhoon-api, typhoon-api-num, typhoon-2b ล้วนเป็นโมเดลเดียวกัน
+    ต่างกันแค่คำสั่งหรือวิธีเรียก จึงอ่านผิดแบบเดียวกัน
+    ถ้าปล่อยให้โหวตกันเองจะได้สองเสียงจากความเห็นเดียว
+    """
+    return name.split("+")[0].split("-")[0]
+
+
+def engine_variant(name: str) -> str:
+    """อ่านจากภาพชุดไหน — ลบลายน้ำแล้วหรือภาพดิบ"""
+    return "clean" if name.endswith("+clean") else "raw"
+
+
+def independent_peers(target: str, names: list[str]) -> list[str]:
+    """คัดเฉพาะ engine ที่ให้ความเห็นอิสระจริงกับตัวเป้าหมาย
+
+    ตัดสองกลุ่มออก
+      1. ตระกูลเดียวกัน — อ่านผิดเหมือนกันอยู่แล้ว ไม่ใช่ความเห็นที่สอง
+      2. คนละชุดภาพ — ตัวที่อ่านภาพดิบเห็นลายน้ำด้วย ข้อความจึงต่างกัน
+         โดยไม่เกี่ยวกับความแม่น ถ้าเอามาโหวตจะได้แต่เสียงเตือนปลอม
+    """
+    family, variant = engine_family(target), engine_variant(target)
+    picked: dict[str, str] = {}
+    for n in sorted(names):
+        fam = engine_family(n)
+        if n == target or fam == family or engine_variant(n) != variant:
+            continue
+        # หนึ่งเสียงต่อหนึ่งตระกูล — ถ้านับ typhoon-api กับ typhoon-api-num
+        # เป็นสองเสียง เกณฑ์ "สองตัวเห็นตรงกัน" จะผ่านได้ด้วยความเห็นเดียว
+        picked.setdefault(fam, n)
+    return list(picked.values())
+
+
+def pick_grid(pages: dict[str, tuple[list[str], list[list[int] | None]]]) -> str | None:
+    """เลือก engine ที่จะใช้เป็น "แกนบรรทัด" ของหน้า
+
+    ทุกตัวต้องมาเทียบกันบนกริดเดียว ไม่งั้นเทียบไม่ได้เลย เพราะ
+      - VLM รวมย่อหน้าที่ถูกตัดคำให้เป็นบรรทัดเดียว
+      - PaddleOCR กับ EasyOCR ซอยบรรทัดเดียวเป็นชิ้นย่อย
+    จับคู่สองแบบนี้ตรง ๆ แล้วจะได้เสียงเตือนปลอมท่วม (วัดแล้ว ๑๐๖ จาก ๓๕๘ บรรทัด)
+
+    แกนต้องมาจากตัวที่ซอยตามบรรทัดจริงในภาพและคืนพิกัดมาด้วย
+    จึงเลือกตัวที่ให้บรรทัดน้อยที่สุดในบรรดาตัวที่มีพิกัด เพราะความผิดพลาด
+    ที่เจอจริงคือการซอยเกิน ไม่ใช่ซอยขาด
+    (วัดกับ ๖ หน้า: Tesseract ให้ 29/36/29/8/34/32 เทียบกับเฉลย 28/36/29/8/34/32
+     ส่วน EasyOCR ให้ถึง 47/57/42/11/77/59)
+    """
+    candidates = [
+        (sum(1 for b in boxes if b), name)
+        for name, (lines, boxes) in pages.items()
+        if any(boxes) and lines
+    ]
+    return min(candidates)[1] if candidates else None
+
+
+@dataclass
+class GridLine:
+    """หนึ่งบรรทัดบนภาพ พร้อมสิ่งที่แต่ละ engine อ่านได้ตรงบรรทัดนั้น"""
+
+    index: int
+    box: Box | None
+    reads: dict[str, str] = field(default_factory=dict)
+
+
+def build_grid(
+    pages: dict[str, tuple[list[str], list[list[int] | None]]],
+    grid_engine: str,
+) -> list[GridLine]:
+    """จัดผลของทุก engine ลงบนกริดบรรทัดเดียวกัน"""
+    from .metrics import align_lines
+
+    grid_lines, grid_boxes = pages[grid_engine]
+    out = [
+        GridLine(
+            index=i,
+            box=tuple(grid_boxes[i]) if i < len(grid_boxes) and grid_boxes[i] else None,  # type: ignore[arg-type]
+            reads={grid_engine: line},
+        )
+        for i, line in enumerate(grid_lines)
+    ]
+
+    for name, (lines, _) in pages.items():
+        if name == grid_engine:
+            continue
+        # ใช้กริดเป็นฝั่ง "เฉลย" — align_lines จะหั่นย่อหน้าที่ VLM รวมมา
+        # กลับเป็นทีละบรรทัดตามกริดให้เอง
+        for pair in align_lines(grid_lines, lines).pairs:
+            if pair.truth_index is None or pair.pred_index is None:
+                continue
+            out[pair.truth_index].reads[name] = pair.pred
+    return out
+
+
+def scan_page(
+    page_id: str,
+    engine: str,
+    pages: dict[str, tuple[list[str], list[list[int] | None]]],
+    *,
+    thai_doc: bool,
+    grid_engine: str | None = None,
+) -> list[Suspect]:
+    """หาจุดน่าสงสัยของ engine หนึ่งตัวในหน้าหนึ่ง
+
+    pages คือ {ชื่อ engine: (บรรทัด, พิกัด)} ของทุกตัวบนหน้าเดียวกัน รวมตัวเป้าหมาย
+
+    ไม่ใช้เฉลยเลย จึงใช้กับเอกสารที่ยังไม่มีคนทำเฉลยได้ ซึ่งเป็นกรณีของงานจริง
+    """
+    grid_engine = grid_engine or pick_grid(pages)
+    if grid_engine is None or engine not in pages:
+        return []
+
+    out: list[Suspect] = []
+    for row in build_grid(pages, grid_engine):
+        mine = row.reads.get(engine, "")
+        if not mine.strip():
+            continue
+        peers = [t for n, t in row.reads.items() if n != engine and t.strip()]
+        findings = find_in_line(mine, peers, thai_doc=thai_doc)
+        if findings:
+            out.append(
+                Suspect(
+                    page_id=page_id,
+                    engine=engine,
+                    grid_line=row.index,
+                    text=mine,
+                    findings=findings,
+                    box=row.box,
+                    box_from=engine if engine == grid_engine else f"ยืมจาก {grid_engine}",
+                )
+            )
+    return out

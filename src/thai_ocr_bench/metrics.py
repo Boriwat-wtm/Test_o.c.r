@@ -165,7 +165,7 @@ class PageScore:
         return (self.truth_lines - self.missed_lines) / self.truth_lines
 
 
-def _index_map(src: str, dest: str) -> list[int]:
+def index_map(src: str, dest: str) -> list[int]:
     """ตารางแปลงตำแหน่งในสตริงหนึ่งไปเป็นตำแหน่งในอีกสตริง (ยาว len(src)+1)
 
     ใช้ opcodes ของ Levenshtein เป็นโครง แล้วเกลี่ยตำแหน่งภายในแต่ละช่วงตามสัดส่วน
@@ -199,7 +199,7 @@ def split_by_truth(truth_group: list[str], pred: str) -> list[str]:
     if not joined or not dense:
         return [pred] + [""] * (len(truth_group) - 1)
 
-    table = _index_map(joined, dense)
+    table = index_map(joined, dense)
     cuts = []
     acc = 0
     for part in parts[:-1]:

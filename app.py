@@ -16,7 +16,7 @@ from pathlib import Path
 import streamlit as st
 
 from thai_ocr_bench import progress, store
-from thai_ocr_bench.config import IMAGE_DIR
+from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR
 from thai_ocr_bench.metrics import (
     Span,
     align_lines,
@@ -25,6 +25,11 @@ from thai_ocr_bench.metrics import (
     thai_digit_report,
 )
 from thai_ocr_bench.render import PageInfo, load_pages
+from thai_ocr_bench.suspect import (
+    independent_peers,
+    scan_page,
+    thai_digit_document,
+)
 from thai_ocr_bench.viewer import (
     EngineRecord,
     LineRecord,
@@ -344,6 +349,150 @@ def progress_banner(total_pages: int) -> None:
 
 def page_label(p: PageInfo) -> str:
     return f"{p.doc_name} · หน้า {p.page_no}"
+
+
+# ── หน้าจุดน่าสงสัย ──────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False, max_entries=64)
+def _crop(path: str, box: tuple[int, int, int, int], pad: int = 12) -> str | None:
+    """ครอปบรรทัดเดียวออกจากภาพหน้าเต็ม แล้วคืนเป็น data URI
+
+    เผื่อขอบไว้เล็กน้อยเพราะกรอบที่ engine ตีมักชิดตัวอักษรจนวรรณยุกต์บนล่างโดนตัด
+    ซึ่งเป็นตัวที่ต้องดูที่สุดเวลาตรวจภาษาไทย
+    """
+    import base64
+    import io
+
+    from PIL import Image
+
+    src = Path(path)
+    if not src.exists():
+        return None
+    with Image.open(src) as im:
+        x, y, w, h = box
+        area = (max(0, x - pad), max(0, y - pad),
+                min(im.width, x + w + pad), min(im.height, y + h + pad))
+        crop = im.crop(area).convert("RGB")
+        # ขยายให้อ่านออกบนจอ กรอบบรรทัดสูงราว ๗๐ px ซึ่งเล็กเกินกว่าจะตรวจด้วยตา
+        if crop.height < 90:
+            scale = 90 / crop.height
+            crop = crop.resize((int(crop.width * scale), 90), Image.LANCZOS)
+        buf = io.BytesIO()
+        crop.save(buf, format="WEBP", quality=88)
+    return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def image_dir_for(engine: str) -> Path:
+    """engine ที่ลงท้าย +clean อ่านจากภาพที่ลบลายน้ำแล้ว พิกัดจึงอิงภาพชุดนั้น"""
+    return CLEAN_IMAGE_DIR if engine.endswith("+clean") else IMAGE_DIR
+
+
+@st.cache_data(show_spinner="กำลังหาจุดน่าสงสัย…")
+def _scan_suspects(engine: str, _results: dict) -> list:
+    """ไล่ทุกหน้าหาจุดน่าสงสัยของ engine หนึ่งตัว
+
+    ไม่ใช้เฉลยเลย จึงใช้กับเอกสารที่ยังไม่มีคนทำเฉลยได้ ซึ่งเป็นกรณีของงานจริง
+    """
+    per_engine = {
+        name: {
+            pid: (page.lines, [b if b else None for b in page.boxes])
+            for pid, page in pages.items()
+        }
+        for name, pages in _results.items()
+    }
+    if engine not in per_engine:
+        return []
+
+    # เหลือเฉพาะตัวที่ให้ความเห็นอิสระ + ตัวเป้าหมายเอง
+    keep = set(independent_peers(engine, list(per_engine))) | {engine}
+    per_engine = {n: v for n, v in per_engine.items() if n in keep}
+
+    thai_doc = thai_digit_document(
+        [ln for lines, _ in per_engine[engine].values() for ln in lines]
+    )
+    out = []
+    for pid in sorted(per_engine[engine]):
+        page = {n: v[pid] for n, v in per_engine.items() if pid in v}
+        out.extend(scan_page(pid, engine, page, thai_doc=thai_doc))
+    return out
+
+
+def highlight(text: str, findings: list) -> str:
+    """ระบายสีเฉพาะช่วงที่น่าสงสัย ส่วนที่เหลือปล่อยไว้"""
+    marks = []
+    cursor = 0
+    for f in sorted(findings, key=lambda f: f.start):
+        if f.start < cursor:
+            continue
+        marks.append(html.escape(text[cursor:f.start]))
+        tip = f"{html.escape(f.reason)} — น่าจะเป็น: {html.escape(f.suggestion)}"
+        marks.append(f'<span class="wrong" data-tip="{tip}">{html.escape(f.text) or "␣"}</span>')
+        cursor = f.end
+    marks.append(html.escape(text[cursor:]))
+    return f'<div class="ln">{"".join(marks)}</div>'
+
+
+def view_suspects(pages: list[PageInfo], results: dict) -> None:
+    st.subheader("จุดน่าสงสัย")
+    st.caption(
+        "หาจุดที่น่าจะอ่านผิดโดยไม่ใช้เฉลย — ใช้ได้กับเอกสารที่ยังไม่มีใครทำเฉลย "
+        "สองชั้น: กฎตายตัว (เลขยกกำลัง เลขอารบิกปนในเอกสารเลขไทย) "
+        "และการที่ engine อื่นตั้งแต่สองตัวขึ้นไปอ่านได้ไม่ตรงกับตัวนี้"
+    )
+    if not results:
+        st.warning("ยังไม่มีผล OCR")
+        return
+
+    top = st.columns([2, 1, 1])
+    engine = top[0].selectbox("ตรวจ engine", sorted(results))
+    only = top[1].selectbox("กรองชั้น", ["ทั้งหมด", "กฎตายตัว", "engine อื่นไม่เห็นด้วย"])
+    show_crop = top[2].toggle("แสดงภาพครอป", value=True)
+
+    suspects = _scan_suspects(engine, results)
+    want = {"กฎตายตัว": "rule", "engine อื่นไม่เห็นด้วย": "vote"}.get(only)
+    if want:
+        suspects = [s for s in suspects if want in s.layers]
+
+    voters = independent_peers(engine, list(results))
+    st.caption(
+        "ผู้โหวต: " + (" · ".join(voters) if voters else "ไม่มี — เหลือแต่ชั้นกฎตายตัว")
+    )
+
+    total_lines = sum(len(p.lines) for p in results[engine].values())
+    a, b, c = st.columns(3)
+    a.metric("บรรทัดทั้งหมด", total_lines)
+    b.metric("จุดน่าสงสัย", len(suspects))
+    c.metric("สัดส่วนที่ต้องตรวจ", f"{len(suspects) / total_lines:.1%}" if total_lines else "-")
+
+    if not suspects:
+        st.success("ไม่พบจุดน่าสงสัย — ไม่ได้แปลว่าไม่มีที่ผิด แปลว่าสองชั้นนี้จับไม่ได้")
+        return
+
+    st.divider()
+    img_dir = image_dir_for(engine)
+    for s in suspects:
+        with st.container(border=True):
+            head = st.columns([3, 2])
+            head[0].markdown(f"**{s.page_id}** · บรรทัดที่ {s.grid_line + 1}")
+            tags = " ".join(
+                pill("กฎตายตัว" if lay == "rule" else "engine อื่นไม่เห็นด้วย",
+                     "warn" if lay == "rule" else "bad")
+                for lay in sorted(s.layers)
+            )
+            head[1].markdown(tags, unsafe_allow_html=True)
+
+            if show_crop and s.box:
+                uri = _crop(str(img_dir / f"{s.page_id}.png"), s.box)
+                if uri:
+                    st.markdown(
+                        f'<img src="{uri}" style="width:100%;border-radius:.5rem;'
+                        f'border:1px solid var(--border)">',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(f"ครอปจากภาพจริง · พิกัด{' ' + s.box_from if s.box_from else ''}")
+
+            st.markdown(highlight(s.text, s.findings), unsafe_allow_html=True)
+            for f in s.findings:
+                st.caption(f"「{f.text}」 → น่าจะเป็น 「{f.suggestion}」 · {f.reason}")
 
 
 # ── หน้า 1 ตรวจภาพ ───────────────────────────────────────────────────────
@@ -705,14 +854,18 @@ def main() -> None:
 
     progress_banner(len(pages))
 
-    tabs = st.tabs(["🔍 เปรียบเทียบ", "📊 สรุปผล", "✏️ ทำเฉลย", "🖼️ ตรวจภาพ"])
+    tabs = st.tabs(
+        ["🔍 เปรียบเทียบ", "⚠️ จุดน่าสงสัย", "📊 สรุปผล", "✏️ ทำเฉลย", "🖼️ ตรวจภาพ"]
+    )
     with tabs[0]:
         view_compare(pages, results)
     with tabs[1]:
-        view_summary(pages, results)
+        view_suspects(pages, results)
     with tabs[2]:
-        view_truth(pages, results)
+        view_summary(pages, results)
     with tabs[3]:
+        view_truth(pages, results)
+    with tabs[4]:
         view_images(pages)
 
 

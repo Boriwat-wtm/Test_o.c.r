@@ -24,6 +24,26 @@ paddle = ["paddleocr>=3.7.0", "paddlepaddle>=3.3.1"]
 # ใช้โมเดลชุดเดียวกันผ่าน ONNX จึงไม่ต้องพึ่ง framework ของ Paddle
 # หมายเหตุ: แพ็กเกจชื่อ rapidocr-onnxruntime เลิกพัฒนาแล้ว (ค้างที่ 1.4.4)
 rapid = ["rapidocr>=3.9.2", "onnxruntime>=1.20"]
+typhoon = ["typhoon-ocr>=0.4.1"]
+# ThaiTrOCR โหลดโมเดลผ่าน transformers และต้องมี torch
+trocr = ["transformers>=5.0", "torch>=2.8"]
+
+# ทุก engine ที่ใช้จริง — มีไว้ให้ `uv sync --extra all` คืนสภาพแวดล้อมได้ครบ
+# ถ้าไม่ประกาศไว้ตรงนี้ `uv sync` เปล่า ๆ จะถอน engine ทิ้งทั้งหมด
+all = [
+    "pytesseract>=0.3.10",
+    "easyocr>=1.7.2",
+    "paddleocr>=3.7.0",
+    "paddlepaddle>=3.3.1",
+    "typhoon-ocr>=0.4.1",
+    "transformers>=5.0",
+    "torch>=2.8",
+]
+
+# เครื่องมือตอนพัฒนา — uv sync ติดตั้งกลุ่มนี้ให้เองโดยไม่ต้องระบุ extra
+# เดิม pytest ถูกติดตั้งนอกไฟล์นี้ พอ uv sync ก็หายไปทั้งชุด
+[dependency-groups]
+dev = ["pytest>=8.0"]
 
 [build-system]
 requires = ["hatchling"]
