@@ -24,6 +24,12 @@ from thai_ocr_bench.metrics import (
     thai_digit_report,
 )
 from thai_ocr_bench.render import PageInfo, load_pages
+from thai_ocr_bench.viewer import (
+    EngineRecord,
+    LineRecord,
+    build_html,
+    encode_image,
+)
 from thai_ocr_bench.thai_text import THAI_DIGITS
 from thai_ocr_bench.truth import load as load_truth, upsert as save_truth
 
@@ -111,16 +117,6 @@ CSS = """
   .good { background:var(--good-bg); color:var(--good-ink); }
   .warn { background:var(--warn-bg); color:var(--warn-ink); }
   .bad  { background:var(--bad-bg);  color:var(--bad-ink); }
-
-  /* คอลัมน์ภาพ+เฉลยในแท็บเปรียบเทียบ ลอยติดจอขณะเลื่อนดูรายการ engine
-     st.container(key="compare_pin") ทำให้ Streamlit ใส่คลาสนี้ให้เอง */
-  .st-key-compare_pin {
-    position: sticky;
-    top: .75rem;
-    align-self: flex-start;
-    max-height: calc(100vh - 1.5rem);
-    overflow-y: auto;
-  }
 </style>
 """
 
@@ -149,6 +145,30 @@ def spans_to_html(spans: list[Span]) -> str:
                 f'<span class="missing" data-tip="ตกหล่น — engine ไม่ได้อ่านส่วนนี้">{text}</span>'
             )
     return f'<div class="ln">{"".join(out)}</div>'
+
+
+def spans_to_inner(spans: list[Span]) -> str:
+    """เหมือน spans_to_html แต่ไม่มี div ครอบ — ใช้ในหน้า split view
+
+    แยกออกมาเพราะ component ฝั่ง JS จัดโครง div เอง ต้องการแค่เนื้อใน
+    """
+    out = []
+    for span in spans:
+        text = html.escape(span.text) or "␣"
+        if span.kind == "ok":
+            out.append(f'<span class="ok">{text}</span>')
+        elif span.kind == "wrong":
+            tip = (
+                f"ควรเป็น: {html.escape(span.expected)}"
+                if span.expected
+                else "ส่วนเกิน — ไม่มีในเฉลย"
+            )
+            out.append(f'<span class="wrong" data-tip="{tip}">{text}</span>')
+        else:
+            out.append(
+                f'<span class="missing" data-tip="ตกหล่น — engine ไม่ได้อ่านส่วนนี้">{text}</span>'
+            )
+    return "".join(out)
 
 
 def pill(label: str, tone: str) -> str:
@@ -369,8 +389,12 @@ def view_truth(pages: list[PageInfo], results: dict) -> None:
 
 # ── หน้า 3 เปรียบเทียบ ───────────────────────────────────────────────────
 def view_compare(pages: list[PageInfo], results: dict) -> None:
-    st.subheader("เปรียบเทียบรายหน้า")
+    """แท็บเปรียบเทียบ — ใช้ HTML component ตัวเดียวจบ
 
+    ฝั่ง Python ทำแค่คำนวณคะแนนแล้วเตรียมข้อมูล ส่วนการแสดงผลทั้งหมด
+    (split view, ซูม/ลากรูป, scroll แยกฝั่ง, hover ไฮไลต์กรอบ, สลับโหมด)
+    อยู่ใน viewer.py เพราะ Streamlit ทำสี่อย่างนั้นตรง ๆ ไม่ได้
+    """
     truth = load_truth()
     have_truth = [p for p in pages if p.page_id in truth]
     if not have_truth:
@@ -378,110 +402,162 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         return
 
     labels = {page_label(p): p for p in have_truth}
-    picked = labels[st.selectbox("หน้า", list(labels))]
-    engines = st.multiselect(
-        "engine", sorted(results), default=sorted(results)
+    top = st.columns([3, 2, 1])
+    picked = labels[top[0].selectbox("หน้า", list(labels), label_visibility="collapsed")]
+    chosen = top[1].multiselect(
+        "engine",
+        sorted(results),
+        default=sorted(results),
+        label_visibility="collapsed",
+        placeholder="เลือก engine",
     )
-    show_spurious = st.checkbox("แสดงบรรทัดที่ OCR พ่นเกินมา (ลายน้ำ/ลายเซ็น/ขยะ)")
-
-    st.markdown(
-        f"{pill('แดง = อ่านผิด', 'bad')}{pill('เหลือง = ตกหล่น', 'warn')}"
-        "  ชี้เมาส์ที่ตัวไฮไลต์เพื่อดูเฉลยของตัวนั้น",
-        unsafe_allow_html=True,
+    tall = top[2].selectbox(
+        "ความสูง", ["ปกติ", "สูง", "เต็มจอ"], label_visibility="collapsed"
     )
+    height = {"ปกติ": 760, "สูง": 900, "เต็มจอ": 1100}[tall]
 
-    image_col, text_col = st.columns([1, 2])
-    image = IMAGE_DIR / f"{picked.page_id}.png"
+    image_path = IMAGE_DIR / f"{picked.page_id}.png"
+    if not image_path.exists():
+        st.error(f"ไม่พบไฟล์ภาพ {image_path.name}")
+        return
+
     truth_lines = truth[picked.page_id].lines
+    engines = [
+        _engine_record(name, results.get(name, {}).get(picked.page_id), truth_lines)
+        for name in chosen
+    ]
+    engines = [e for e in engines if e is not None]
 
-    # ภาพต้นฉบับ + เฉลยอยู่ในการ์ดเดียวกัน ลอยติดจอขณะเลื่อนดู engine ทางขวา
-    # (ไม่งั้นต้องเลื่อนขึ้นไปดูต้นฉบับทุกครั้งที่อยากเทียบ)
-    with image_col:
-        with st.container(key="compare_pin"):
-            if image.exists():
-                with st.container(border=True):
-                    st.image(str(image), use_container_width=True)
-            st.markdown('<div class="lab" style="margin-top:.9rem;">เฉลย</div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="truth">' + "<br>".join(html.escape(t) for t in truth_lines) + "</div>",
-                unsafe_allow_html=True,
+    image_uri, img_w, img_h = _cached_image(str(image_path))
+    st.components.v1.html(
+        build_html(
+            image_uri=image_uri,
+            image_w=img_w,
+            image_h=img_h,
+            page_title=page_label(picked),
+            truth_lines=truth_lines,
+            engines=engines,
+            height=height,
+        ),
+        height=height + 12,
+        scrolling=False,
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=24)
+def _cached_image(path: str) -> tuple[str, int, int]:
+    """แปลงรูปเป็น data URI แล้วจำไว้ — ไม่งั้นทุกครั้งที่กดอะไรก็เข้ารหัสใหม่"""
+    return encode_image(Path(path))
+
+
+def _engine_record(
+    name: str, stored, truth_lines: list[str]
+) -> EngineRecord | None:
+    """แปลงผลดิบของ engine หนึ่งตัวเป็นข้อมูลที่ component ใช้ได้"""
+    if stored is None:
+        return EngineRecord(
+            name=name,
+            notes=[{"kind": "info", "text": "ยังไม่ได้อ่านหน้านี้"}],
+        )
+    if not stored.ok:
+        return EngineRecord(
+            name=name,
+            notes=[{"kind": "error", "text": f"พัง: {html.escape(str(stored.error))}"}],
+        )
+
+    score = align_lines(truth_lines, stored.lines)
+    digits = thai_digit_report("\n".join(truth_lines), "\n".join(stored.lines))
+    whole = page_cer(truth_lines, stored.lines)
+
+    badges: list[dict] = []
+    if score.matched_cer is not None:
+        badges.append(
+            {"label": f"CER บรรทัด {score.matched_cer:.1%}", "tone": cer_tone(score.matched_cer)}
+        )
+    if whole is not None:
+        badges.append({"label": f"CER หน้า {whole:.1%}", "tone": cer_tone(whole)})
+    badges.append(
+        {
+            "label": f"อ่านครบ {score.truth_lines - score.missed_lines}/{score.truth_lines}",
+            "tone": "good" if (score.recall or 0) >= 0.95 else "bad",
+        }
+    )
+    if score.spurious_lines:
+        badges.append({"label": f"เกิน {score.spurious_lines} บรรทัด", "tone": "warn"})
+    if digits["total"]:
+        strict = float(digits["strict"] or 0)
+        badges.append(
+            {"label": f"เลขไทย {strict:.0%}", "tone": "good" if strict >= 0.9 else "bad"}
+        )
+    badges.append({"label": f"{stored.core_ms / 1000:.1f}s", "tone": "good"})
+
+    notes: list[dict] = []
+    loop = repeated_line(stored.lines)
+    if loop:
+        text, count = loop
+        notes.append(
+            {
+                "kind": "error",
+                "text": f"engine นี้ติดลูป — พ่นบรรทัดเดิมซ้ำ {count} ครั้ง ผลของหน้านี้ใช้เทียบไม่ได้",
+            }
+        )
+    elif (ratio := merges_lines(truth_lines, stored.lines)) is not None:
+        notes.append(
+            {
+                "kind": "info",
+                "text": f"engine นี้รวมหลายบรรทัดเป็นก้อนเดียว (ยาวกว่าเฉลย {ratio:.1f} เท่า) "
+                "ค่าอ่านครบจึงต่ำผิดปกติทั้งที่อ่านถูก — ให้ดู CER หน้า เป็นหลัก",
+            }
+        )
+
+    def box_of(i: int | None):
+        if i is None or i >= len(stored.boxes):
+            return None
+        return stored.boxes[i]
+
+    def conf_of(i: int | None):
+        if i is None or i >= len(stored.confidences):
+            return None
+        return stored.confidences[i]
+
+    records: list[LineRecord] = []
+    for pair in score.pairs:
+        if pair.truth_index is not None and pair.pred_index is None:
+            records.append(
+                LineRecord(
+                    kind="missed",
+                    html="ไม่ได้อ่านบรรทัดนี้ &nbsp;<span style='opacity:.6'>("
+                    + html.escape(pair.truth[:70])
+                    + ")</span>",
+                )
+            )
+        elif pair.truth_index is not None:
+            display = compare(pair.truth, pair.pred, keep_spaces=True)
+            records.append(
+                LineRecord(
+                    kind="matched",
+                    html=spans_to_inner(display.spans),
+                    box=box_of(pair.pred_index),
+                    conf=conf_of(pair.pred_index),
+                )
+            )
+        else:
+            records.append(
+                LineRecord(
+                    kind="spurious",
+                    html="เกินมา: " + html.escape(pair.pred[:90]),
+                    box=box_of(pair.pred_index),
+                    conf=conf_of(pair.pred_index),
+                )
             )
 
-    with text_col:
-
-        for name in engines:
-            stored = results.get(name, {}).get(picked.page_id)
-
-            with st.container(border=True):
-                st.markdown(f'<div class="lab">{html.escape(name)}</div>', unsafe_allow_html=True)
-
-                if stored is None:
-                    st.caption("ยังไม่ได้อ่านหน้านี้")
-                    continue
-                if not stored.ok:
-                    st.error(f"พัง: {stored.error}")
-                    continue
-
-                score = align_lines(truth_lines, stored.lines)
-                digits = thai_digit_report("\n".join(truth_lines), "\n".join(stored.lines))
-                whole = page_cer(truth_lines, stored.lines)
-
-                badges = pill(f"CER บรรทัด {score.matched_cer:.1%}", cer_tone(score.matched_cer)) if score.matched_cer is not None else ""
-                if whole is not None:
-                    badges += pill(f"CER หน้า {whole:.1%}", cer_tone(whole))
-                badges += pill(
-                    f"อ่านครบ {score.truth_lines - score.missed_lines}/{score.truth_lines}",
-                    "good" if (score.recall or 0) >= 0.95 else "bad",
-                )
-                if score.spurious_lines:
-                    badges += pill(f"เกิน {score.spurious_lines} บรรทัด", "warn")
-                if digits["total"]:
-                    strict = float(digits["strict"] or 0)
-                    badges += pill(
-                        f"เลขไทย {strict:.0%}", "good" if strict >= 0.9 else "bad"
-                    )
-                badges += pill(f"{stored.core_ms / 1000:.1f}s", "good")
-                st.markdown(badges, unsafe_allow_html=True)
-
-                loop = repeated_line(stored.lines)
-                if loop:
-                    text, count = loop
-                    st.error(
-                        f"engine นี้ติดลูป — พ่นบรรทัดเดิมซ้ำ {count} ครั้ง "
-                        f"(“{text[:50]}…”) ผลของหน้านี้ใช้เทียบไม่ได้"
-                    )
-                elif merges_lines(truth_lines, stored.lines):
-                    ratio = merges_lines(truth_lines, stored.lines) or 0
-                    st.info(
-                        f"engine นี้รวมหลายบรรทัดเป็นก้อนเดียว (บรรทัดยาวกว่าเฉลย {ratio:.1f} เท่า) "
-                        "ค่า “อ่านครบ” จึงต่ำผิดปกติทั้งที่อ่านถูก — ให้ดู CER หน้า เป็นหลัก"
-                    )
-
-                for pair in score.pairs:
-                    if pair.truth_index is None:
-                        continue
-                    if pair.pred_index is None:
-                        # อย่าเอาข้อความเฉลยมาแสดงเฉย ๆ เพราะจะดูเหมือนผลของ OCR
-                        # ต้องบอกให้ชัดว่า engine นี้ไม่ได้อ่านบรรทัดนี้ออกมาเลย
-                        st.markdown(
-                            '<div class="gone">ไม่ได้อ่านบรรทัดนี้ '
-                            f'<span class="gonetruth">({html.escape(pair.truth[:70])})</span>'
-                            "</div>",
-                            unsafe_allow_html=True,
-                        )
-                        continue
-                    display = compare(pair.truth, pair.pred, keep_spaces=True)
-                    st.markdown(spans_to_html(display.spans), unsafe_allow_html=True)
-
-                if show_spurious:
-                    extra = [p.pred for p in score.pairs if p.truth_index is None]
-                    if extra:
-                        st.markdown(
-                            '<div class="spur"><b>บรรทัดเกิน:</b> '
-                            + " · ".join(html.escape(e) for e in extra[:40])
-                            + "</div>",
-                            unsafe_allow_html=True,
-                        )
+    return EngineRecord(
+        name=name,
+        badges=badges,
+        notes=notes,
+        lines=records,
+        has_boxes=any(b for b in stored.boxes),
+    )
 
 
 # ── หน้า 4 สรุปผล ────────────────────────────────────────────────────────
