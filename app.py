@@ -40,7 +40,7 @@ from thai_ocr_bench.viewer import (
     build_html,
     encode_image,
 )
-from thai_ocr_bench.thai_text import THAI_DIGITS
+from thai_ocr_bench.thai_text import THAI_DIGITS, normalize
 from thai_ocr_bench.truth import (
     find_repeating_lines,
     load as load_truth,
@@ -860,11 +860,38 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     page_round_history(picked.page_id)
 
 
+def text_stats(lines: list[str]) -> dict:
+    """ตัวเลขสรุปของข้อความหนึ่งชุด — ตัวที่งานนี้สนใจจริงคือเลขไทย"""
+    text = "".join(lines)
+    return {
+        "lines": len(lines),
+        "chars": len(text),
+        "thai_digits": sum(text.count(d) for d in THAI_DIGITS),
+        "arabic_digits": sum(text.count(d) for d in "0123456789"),
+    }
+
+
+def diff_note(current: list[str], previous: list[str] | None) -> str:
+    """ต่างจากรอบก่อนแค่ไหน — เทียบหลัง normalize เพื่อไม่ให้ช่องว่างนับเป็นความต่าง"""
+    if previous is None:
+        return "รอบแรกของ engine นี้"
+    from rapidfuzz.distance import Levenshtein
+
+    a, b = normalize("\n".join(current)), normalize("\n".join(previous))
+    if a == b:
+        return "เหมือนรอบก่อนทุกตัวอักษร"
+    sim = Levenshtein.normalized_similarity(a, b)
+    return f"ต่างจากรอบก่อน {1 - sim:.1%}"
+
+
 def page_round_history(page_id: str) -> None:
     """ประวัติการอ่านหน้านี้ทีละรอบ
 
     วางไว้ใต้ split view ไม่ยัดเข้าไปในนั้น เพราะ component ข้างบนออกแบบมา
     สำหรับเทียบผลล่าสุดกับภาพ ส่วนตรงนี้คือเทียบรอบต่อรอบ คนละคำถามกัน
+
+    ต้องบอกให้ครบว่า "รอบนั้นใช้อะไรอ่าน แล้วได้อะไรมา" ไม่ใช่พ่นข้อความดิบ
+    เพราะพอมีหลายรอบแล้วจำไม่ได้ว่ารอบไหนใช้ภาพลบลายน้ำ รอบไหนใช้ภาพดิบ
     """
     rows = history.load_page(page_id)
     if not rows:
@@ -876,39 +903,78 @@ def page_round_history(page_id: str) -> None:
         return
 
     order = history.run_order()
+    runs_meta = {r.get("started_at"): r for r in history.load()}
+
     by_run: dict[str, list[dict]] = {}
     for r in rows:
         by_run.setdefault(r["run"], []).append(r)
 
+    # ผลรอบก่อนหน้าของ engine เดียวกัน ใช้ตอบว่า "รอบนี้ต่างจากรอบก่อนไหม"
+    # rows เรียงใหม่ไปเก่า จึงต้องไล่จากท้ายมาหน้าเพื่อให้ "ก่อนหน้า" ถูกต้อง
+    previous: dict[tuple[str, str], list[str]] = {}
+    seen: dict[str, list[str]] = {}
+    for r in reversed(rows):
+        key = (r["run"], r["engine"])
+        if r["engine"] in seen:
+            previous[key] = seen[r["engine"]]
+        seen[r["engine"]] = r["lines"]
+
     with st.expander(f"ประวัติการอ่านหน้านี้ — {len(by_run)} รอบ", expanded=False):
         labels = {}
         for run in by_run:  # rows เรียงล่าสุดก่อนอยู่แล้ว dict จึงคงลำดับนั้น
-            stamp = run.replace("T", " ").replace("+00:00", "")
             no = order.get(run)
-            head = f"รอบที่ {no}" if no else "รอบที่ ?"
-            labels[f"{head} · {stamp} · {len(by_run[run])} engine"] = run
+            stamp = run.replace("T", " ").replace("+00:00", "")[5:16]
+            labels[f"รอบที่ {no or '?'} · {stamp} · {len(by_run[run])} engine"] = run
 
         pick = st.radio(
             "เลือกรอบ", list(labels), horizontal=False, label_visibility="collapsed"
         )
-        chosen_rows = by_run[labels[pick]]
+        run_key = labels[pick]
+        chosen = by_run[run_key]
+        meta = runs_meta.get(run_key, {})
 
-        st.dataframe(
-            [
+        # หัวข้อรอบ — บอกว่าใช้อะไรอ่าน
+        source = "ภาพลบลายน้ำ (`data/cleaned`)" if meta.get("clean") else "ภาพดิบ (`data/images`)"
+        bits = [f"**ใช้** {source}"]
+        if meta.get("redo"):
+            bits.append("**อ่านใหม่ทับของเก่า**")
+        if meta.get("duration_s"):
+            bits.append(f"**รอบนี้ใช้เวลารวม** {meta['duration_s'] / 60:.1f} นาที")
+        if meta.get("pages"):
+            ran = len([e for e in meta.get("engines", []) if not e.get("skipped")])
+            bits.append(f"**ทั้งรอบ** {ran} engine × {meta['pages']} หน้า")
+        st.markdown(" &nbsp;·&nbsp; ".join(bits))
+
+        table = []
+        for r in chosen:
+            s = text_stats(r["lines"])
+            table.append(
                 {
                     "engine": r["engine"],
-                    "บรรทัด": len(r["lines"]),
+                    "บรรทัด": s["lines"],
+                    "ตัวอักษร": f"{s['chars']:,}",
+                    "เลขไทย": s["thai_digits"],
+                    "เลขอารบิก": s["arabic_digits"],
                     "วินาที": f"{r['ms'] / 1000:.1f}",
+                    "เทียบรอบก่อน": diff_note(
+                        r["lines"], previous.get((r["run"], r["engine"]))
+                    ),
                     "สถานะ": "เสร็จ" if r["ok"] else f"พัง: {r.get('error')}",
                 }
-                for r in chosen_rows
-            ],
-            use_container_width=True,
-            hide_index=True,
+            )
+        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.caption(
+            "เลขอารบิกในเอกสารเลขไทยคืออาการอ่านผิดที่งานนี้วัดโดยตรง "
+            "ตัวเลขสองคอลัมน์นี้จึงบอกได้เร็วกว่าอ่านข้อความเอง"
         )
 
-        for r in chosen_rows:
-            with st.expander(f"{r['engine']} — {len(r['lines'])} บรรทัด"):
+        for r in chosen:
+            s = text_stats(r["lines"])
+            head = (
+                f"{r['engine']} — {s['lines']} บรรทัด · {s['chars']:,} ตัวอักษร"
+                f" · เลขไทย {s['thai_digits']}"
+            )
+            with st.expander(head):
                 st.code("\n".join(r["lines"]) or "(ไม่มีข้อความ)")
 
 
@@ -1175,17 +1241,27 @@ def view_history() -> None:
         head = f"{'✅' if ok else '⚠️'} รอบที่ {no} · {stamp} · {history.summarize(run)}"
 
         with st.expander(head, expanded=(i == 0)):
-            flags = []
-            if run.get("clean"):
-                flags.append("ใช้ภาพลบลายน้ำ")
+            engines_all = run.get("engines", [])
+            ran = [e for e in engines_all if not e.get("skipped")]
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("อ่านจริง", f"{sum(e.get('pages', 0) for e in ran):,} ครั้ง")
+            c2.metric("บรรทัดที่ได้", f"{sum(e.get('lines', 0) for e in ran):,}")
+            c3.metric("เวลา", f"{run.get('duration_s', 0) / 60:.1f} นาที")
+            c4.metric("หน้าพัง", sum(e.get("failures", 0) for e in ran))
+
+            source = "ภาพลบลายน้ำ" if run.get("clean") else "ภาพดิบ"
+            flags = [f"ใช้{source}"]
             if run.get("redo"):
                 flags.append("อ่านใหม่ทับของเก่า")
+            if len(engines_all) - len(ran):
+                flags.append(f"ข้าม {len(engines_all) - len(ran)} engine ที่มีผลแล้ว")
             if not ok:
                 flags.append("**รอบนี้ไม่จบ — หยุดกลางคัน**")
             st.markdown(
-                f"**เอกสาร** {' · '.join(run.get('docs', [])) or '-'}  \n"
-                f"**หน้า** {run.get('pages', 0)}"
-                + (f"  \n**หมายเหตุ** {' · '.join(flags)}" if flags else "")
+                f"**เอกสาร** {' · '.join(run.get('docs', [])) or '-'} "
+                f"({run.get('pages', 0)} หน้า)  \n"
+                f"**สั่งด้วย** {' · '.join(flags)}"
             )
 
             table = []
