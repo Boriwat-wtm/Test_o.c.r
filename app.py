@@ -892,9 +892,15 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     engines = [e for e in engines if e is not None]
 
     image_uri, img_w, img_h = _cached_image(str(image_path))
+    # engine ที่ลงท้าย +clean อ่านจากภาพชุดนี้ ไม่ใช่ภาพดิบ ส่งไปด้วยเพื่อให้
+    # เทียบผลกับสิ่งที่ engine เห็นจริงได้ และดูได้ว่าลายน้ำหายไปตรงไหน
+    clean_path = CLEAN_IMAGE_DIR / f"{picked.page_id}.png"
+    clean_uri = _cached_image(str(clean_path))[0] if clean_path.exists() else None
+
     st.components.v1.html(
         build_html(
             image_uri=image_uri,
+            clean_uri=clean_uri,
             image_w=img_w,
             image_h=img_h,
             page_title=page_label(picked),

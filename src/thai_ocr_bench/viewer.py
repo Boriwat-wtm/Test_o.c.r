@@ -81,9 +81,14 @@ def build_html(
     truth_lines: list[str],
     engines: list[EngineRecord],
     height: int,
+    clean_uri: str | None = None,
 ) -> str:
     payload = {
         "image": image_uri,
+        # ภาพชุดลบลายน้ำของหน้าเดียวกัน (ถ้ามี) — engine ที่ลงท้าย +clean
+        # อ่านจากภาพนี้ ไม่ใช่ภาพดิบ ถ้าโชว์แต่ภาพดิบจะเทียบผลกับสิ่งที่
+        # engine เห็นจริงไม่ได้ โดยเฉพาะตอนไล่ดูว่าลายน้ำหายไปตรงไหน
+        "cleanImage": clean_uri,
         "imgW": image_w,
         "imgH": image_h,
         "pageTitle": page_title,
@@ -163,6 +168,14 @@ _TEMPLATE = r"""
   .stage.drag { cursor:grabbing; }
   .canvas { position:absolute; transform-origin:0 0; }
   .canvas img { display:block; }
+  /* วางสองภาพเรียงกันในกรอบเดียว จะได้ใช้ transform ชุดเดียวกัน
+     ซูมและเลื่อนพร้อมกันทั้งคู่ ไม่ต้องเขียนตัวซิงก์แยก */
+  .imgrow { display:flex; align-items:flex-start; gap:16px; }
+  .imgcell { margin:0; position:relative; }
+  .imgcell figcaption { position:absolute; top:0; left:0;
+                        font-family:var(--mono); font-size:11px; font-weight:600;
+                        color:#fff; background:rgba(20,22,27,.72);
+                        padding:.15rem .45rem; border-bottom-right-radius:6px; }
   .boxes { position:absolute; inset:0; pointer-events:none; }
   .bx { position:absolute; border:2px solid var(--accent);
         background:rgba(79,70,229,.14); border-radius:2px; display:none; }
@@ -272,11 +285,21 @@ _TEMPLATE = r"""
         <button class="btn" data-zoom="1">+</button>
         <button class="btn" id="fitbtn">พอดีจอ</button>
         <button class="btn" id="rotbtn">หมุน</button>
+        <div class="seg" id="imgseg">
+          <button data-img="raw" class="on">ภาพดิบ</button>
+          <button data-img="clean">ลบลายน้ำ</button>
+          <button data-img="both">ทั้งสอง</button>
+        </div>
         <span class="spacer">ลากเพื่อเลื่อน · ล้อเมาส์เพื่อซูม</span>
       </div>
       <div class="stage" id="stage">
         <div class="canvas" id="canvas">
-          <img id="pageimg" />
+          <div class="imgrow" id="imgrow">
+            <figure class="imgcell"><img id="pageimg" /><figcaption>ภาพดิบ</figcaption></figure>
+            <figure class="imgcell" id="cleancell" hidden>
+              <img id="cleanimg" /><figcaption>ลบลายน้ำแล้ว</figcaption>
+            </figure>
+          </div>
           <div class="boxes" id="boxes"><div class="bx" id="bx"></div></div>
         </div>
       </div>
@@ -302,6 +325,29 @@ const zoomval= document.getElementById('zoomval');
 let scale = 1, tx = 0, ty = 0, rot = 0, baseScale = 1;
 img.src = DATA.image;
 
+// ── สลับภาพต้นทาง ──────────────────────────────────────────────────────
+const cleanImg  = document.getElementById('cleanimg');
+const cleanCell = document.getElementById('cleancell');
+const rawCell   = img.closest('.imgcell');
+const imgseg    = document.getElementById('imgseg');
+
+if (DATA.cleanImage) {
+  cleanImg.src = DATA.cleanImage;
+} else {
+  // หน้านี้ไม่มีภาพชุดลบลายน้ำ ปุ่มเลือกจึงไม่มีความหมาย
+  imgseg.style.display = 'none';
+}
+
+function showImages(which) {
+  rawCell.hidden   = which === 'clean';
+  cleanCell.hidden = which === 'raw';
+  // ป้ายกำกับมีประโยชน์เฉพาะตอนวางคู่กัน ดูทีละภาพก็รู้อยู่แล้วว่าดูอันไหน
+  document.querySelectorAll('.imgcell figcaption')
+    .forEach(c => c.style.display = which === 'both' ? '' : 'none');
+  fit();
+}
+showImages('raw');
+
 function apply() {
   canvas.style.transform =
     `translate(${tx}px, ${ty}px) scale(${scale}) rotate(${rot}deg)`;
@@ -310,7 +356,11 @@ function apply() {
 
 function fit() {
   const sw = stage.clientWidth, sh = stage.clientHeight;
-  const iw = img.naturalWidth || 1, ih = img.naturalHeight || 1;
+  // วัดจากแถวรูป ไม่ใช่จากรูปเดียว เพราะโหมด "ทั้งสอง" กว้างเป็นสองเท่า
+  // ถ้าวัดจากรูปเดียวจะซูมเกินจนภาพที่สองหลุดออกนอกเวที
+  const row = document.getElementById('imgrow');
+  const iw = row.offsetWidth || img.naturalWidth || 1;
+  const ih = row.offsetHeight || img.naturalHeight || 1;
   const swapped = rot % 180 !== 0;
   baseScale = Math.min(sw / (swapped ? ih : iw), sh / (swapped ? iw : ih)) * 0.96;
   scale = baseScale;
@@ -468,6 +518,14 @@ document.getElementById('modeseg').onclick = e => {
   document.querySelectorAll('#modeseg button')
     .forEach(x => x.classList.toggle('on', x === b));
   render();
+};
+
+imgseg.onclick = e => {
+  const b = e.target.closest('button[data-img]');
+  if (!b) return;
+  document.querySelectorAll('#imgseg button')
+    .forEach(x => x.classList.toggle('on', x === b));
+  showImages(b.dataset.img);
 };
 
 document.getElementById('varseg').onclick = e => {
