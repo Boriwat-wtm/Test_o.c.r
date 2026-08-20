@@ -564,39 +564,6 @@ def page_label(p: PageInfo) -> str:
     return f"{p.doc_name} · หน้า {p.page_no}"
 
 
-def pick_page(
-    pages: list[PageInfo], key: str, truth: dict, *, columns=None
-) -> PageInfo:
-    """เลือกหน้าแบบสองชั้น เอกสารก่อน แล้วค่อยหน้าในเอกสารนั้น
-
-    ชั้นเดียวใช้ไม่ได้เมื่อชุดข้อมูลโต ตอนนี้ 67 หน้าก็ต้องเลื่อนหายาวแล้ว
-    ถ้าเป็น 10 เอกสาร เอกสารละ 100 หน้าจะกลายเป็นรายการ 1,000 บรรทัด
-    ที่ชื่อเอกสารซ้ำกันทุกบรรทัด ยาว 40 ตัวอักษร ต่างกันแค่เลขหน้าท้ายสุด
-
-    แยกสองชั้นแล้วรายการยาวสุดเท่ากับจำนวนหน้าของเอกสารเดียว
-    และป้ายในชั้นที่สองสั้นลงเหลือ "หน้า N" เพราะรู้อยู่แล้วว่าเอกสารไหน
-    """
-    docs = sorted({p.doc_name for p in pages})
-    count = Counter(p.doc_name for p in pages)
-    missing = {d: sum(1 for p in pages if p.doc_name == d and p.page_id not in truth)
-               for d in docs}
-
-    c1, c2 = columns if columns is not None else st.columns([3, 2])
-
-    def doc_label(d: str) -> str:
-        gap = f" · ไม่มีเฉลย {missing[d]}" if missing[d] else ""
-        return f"{short_doc(d, 26)} ({count[d]} หน้า{gap})"
-
-    doc = c1.selectbox("เอกสาร", docs, format_func=doc_label, key=f"{key}_doc")
-
-    subset = [p for p in pages if p.doc_name == doc]
-    labels = {
-        f"หน้า {p.page_no}" + ("" if p.page_id in truth else "  ·  ยังไม่มีเฉลย"): p
-        for p in subset
-    }
-    return labels[c2.selectbox("หน้า", list(labels), key=f"{key}_page")]
-
-
 # ── หน้าจุดน่าสงสัย ──────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, max_entries=64)
 def _crop(path: str, box: tuple[int, int, int, int], pad: int = 12) -> str | None:
@@ -786,7 +753,8 @@ def view_truth(pages: list[PageInfo], results: dict) -> None:
     )
 
     truth = load_truth()
-    picked = pick_page(pages, "truth", truth)
+    labels = {page_label(p): p for p in pages}
+    picked = labels[st.selectbox("หน้า", list(labels))]
 
     left, right = st.columns([1, 1])
     image = IMAGE_DIR / f"{picked.page_id}.png"
@@ -833,13 +801,17 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     # เลือกได้ทุกหน้า ไม่ใช่เฉพาะหน้าที่มีเฉลย เฉลยสร้างอัตโนมัติจาก text layer
     # ไฟล์สแกนจึงไม่มี แล้วเคยหายไปจากช่องเลือกเงียบ ๆ ทั้งที่ยังดูผลเทียบกับภาพได้
     # หน้าที่ไม่มีเฉลยจะแสดงข้อความที่อ่านได้โดยไม่มีคะแนน
-    top = st.columns([3, 1.4, 2, 1])
-    picked = pick_page(pages, "cmp", truth, columns=(top[0], top[1]))
+    labels = {
+        page_label(p) + ("" if p.page_id in truth else "  ·  ยังไม่มีเฉลย"): p
+        for p in pages
+    }
+    top = st.columns([3, 2, 1])
+    picked = labels[top[0].selectbox("หน้า", list(labels), label_visibility="collapsed")]
     # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
     # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
     all_engines = sorted(results)
     chosen = (
-        top[2].multiselect(
+        top[1].multiselect(
             "engine",
             all_engines,
             label_visibility="collapsed",
@@ -847,7 +819,7 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         )
         or all_engines
     )
-    tall = top[3].selectbox(
+    tall = top[2].selectbox(
         "ความสูง", ["ปกติ", "สูง", "เต็มจอ"], label_visibility="collapsed"
     )
     height = {"ปกติ": 760, "สูง": 900, "เต็มจอ": 1100}[tall]
