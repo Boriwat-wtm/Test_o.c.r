@@ -189,16 +189,16 @@ _TEMPLATE = r"""
      ไปทับบรรทัดสุดท้ายของกลุ่มก่อนหน้าตอนเลื่อน ซึ่งบังข้อความที่กำลังอ่านอยู่
      แลกไม่คุ้ม เอาออกแล้วทำให้หัวติดเป็นเนื้อเดียวกับกลุ่มของตัวเองแทน
      กล่องครอบทั้งกลุ่มทำให้เห็นขอบเขตชัดโดยไม่ต้องพึ่ง sticky */
-  .grp { margin-bottom:1.4rem; border:1px solid var(--border); border-radius:12px;
-         overflow:hidden; background:var(--surface-2); }
-  .grphead { display:flex; align-items:center; gap:.5rem;
+  /* เงียบไว้ ทั้งหน้าใช้สีอ่อนกับเส้นบางหมด แถบสีทึบเต็มความกว้างจะดังเกิน
+     จนกลายเป็นสิ่งแรกที่สายตาไปหา ทั้งที่มันเป็นแค่ป้ายบอกหมวด
+     เส้นคั่นบาง ๆ กับที่ว่างพอบอกขอบเขตได้แล้ว */
+  .grp { margin-bottom:1.35rem; }
+  .grphead { display:flex; align-items:baseline; gap:.45rem;
              font-family:var(--mono); font-size:12px; font-weight:700;
-             color:#fff; background:var(--accent);
-             padding:.45rem .75rem; }
-  .grp > .cols { padding:.7rem .7rem 0; }
-  .grpcount { font-weight:500; font-size:11px; color:#fff;
-              background:rgba(255,255,255,.22); border-radius:999px;
-              padding:.1rem .5rem; }
+             letter-spacing:.02em; color:var(--ink-soft);
+             padding-bottom:.4rem; margin-bottom:.65rem;
+             border-bottom:1px solid var(--border); }
+  .grpcount { font-weight:500; font-size:10.5px; color:var(--ink-faint); }
 
   .card { border:1px solid var(--border); border-radius:12px; padding:.7rem .85rem;
           margin-bottom:.7rem; background:var(--surface); }
