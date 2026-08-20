@@ -170,8 +170,13 @@ _TEMPLATE = r"""
                  color:var(--ink-soft); white-space:nowrap; font-family:var(--mono); }
   .tabs button.on { color:var(--accent); border-bottom-color:var(--accent); }
   .scroll { flex:1; overflow-y:auto; padding:.75rem .85rem 1.5rem; }
-  .cols { display:flex; gap:.75rem; align-items:flex-start; }
-  .cols > div { flex:1; min-width:0; }
+  /* โหมดเทียบพร้อมกัน: ตั้งความกว้างขั้นต่ำต่อคอลัมน์แล้วให้เลื่อนแนวนอนแทน
+     ของเดิมเป็น flex:1 ล้วน พอเลือก engine ครบ 8 ตัวจะถูกบีบเหลือ 1/8 ของจอ
+     ข้อความไทยตัดคำทีละ 2-3 ตัวอักษร อ่านไม่ออกและวรรณยุกต์ซ้อนกันมั่ว
+     ยอมให้เลื่อนดีกว่าให้ทุกอันพร้อมกันแต่อ่านไม่ได้สักอัน */
+  .cols { display:flex; gap:.75rem; align-items:flex-start;
+          overflow-x:auto; padding-bottom:.5rem; }
+  .cols > div { flex:1 0 340px; min-width:340px; }
 
   .card { border:1px solid var(--border); border-radius:12px; padding:.7rem .85rem;
           margin-bottom:.7rem; background:var(--surface); }

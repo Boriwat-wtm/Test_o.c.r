@@ -704,12 +704,17 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     }
     top = st.columns([3, 2, 1])
     picked = labels[top[0].selectbox("หน้า", list(labels), label_visibility="collapsed")]
-    chosen = top[1].multiselect(
-        "engine",
-        sorted(results),
-        default=sorted(results),
-        label_visibility="collapsed",
-        placeholder="เลือก engine",
+    # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
+    # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
+    all_engines = sorted(results)
+    chosen = (
+        top[1].multiselect(
+            "engine",
+            all_engines,
+            label_visibility="collapsed",
+            placeholder=f"ทุก engine ({len(all_engines)})",
+        )
+        or all_engines
     )
     tall = top[2].selectbox(
         "ความสูง", ["ปกติ", "สูง", "เต็มจอ"], label_visibility="collapsed"
