@@ -984,6 +984,20 @@ def _cached_image(path: str) -> tuple[str, int, int]:
     return encode_image(Path(path))
 
 
+CLEAN_SUFFIX = "+clean"
+
+
+def engine_group(name: str) -> tuple[str, str]:
+    """(ตระกูล, ป้ายภาพต้นทาง) — ผลของ engine เดียวกันคนละภาพควรอยู่ด้วยกัน
+
+    run_bench.py ตั้งชื่อผลเป็น <engine>+clean เมื่อรันกับภาพที่ลบลายน้ำแล้ว
+    ฝั่งแสดงผลจึงแยกกลับออกมาได้จากชื่อ ไม่ต้องเก็บข้อมูลเพิ่ม
+    """
+    if name.endswith(CLEAN_SUFFIX):
+        return name[: -len(CLEAN_SUFFIX)], "ลบลายน้ำแล้ว"
+    return name, "ภาพดิบ"
+
+
 def _unscored_record(name: str, stored) -> EngineRecord:
     """ผลของ engine บนหน้าที่ยังไม่มีเฉลย — ข้อความล้วน ไม่มีคะแนน
 
@@ -1016,8 +1030,11 @@ def _unscored_record(name: str, stored) -> EngineRecord:
         )
         for i, line in enumerate(stored.lines)
     ]
+    group, variant = engine_group(name)
     return EngineRecord(
         name=name,
+        group=group,
+        variant=variant,
         badges=badges,
         notes=notes,
         lines=lines,
@@ -1034,13 +1051,19 @@ def _engine_record(
     โดยไม่มีคะแนน ดีกว่าซ่อนทั้งหน้าเพราะยังเอาไปเทียบกับภาพด้วยตาได้
     """
     if stored is None:
+        group, variant = engine_group(name)
         return EngineRecord(
             name=name,
+            group=group,
+            variant=variant,
             notes=[{"kind": "info", "text": "ยังไม่ได้อ่านหน้านี้"}],
         )
     if not stored.ok:
+        group, variant = engine_group(name)
         return EngineRecord(
             name=name,
+            group=group,
+            variant=variant,
             notes=[{"kind": "error", "text": f"พัง: {html.escape(str(stored.error))}"}],
         )
 
@@ -1133,8 +1156,11 @@ def _engine_record(
                 )
             )
 
+    group, variant = engine_group(name)
     return EngineRecord(
         name=name,
+        group=group,
+        variant=variant,
         badges=badges,
         notes=notes,
         lines=records,

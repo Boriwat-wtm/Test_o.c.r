@@ -48,6 +48,10 @@ class EngineRecord:
     notes: list[dict] = field(default_factory=list)  # {kind, text}
     lines: list[LineRecord] = field(default_factory=list)
     has_boxes: bool = True
+    # ตระกูล engine ใช้จัดกลุ่มในฝั่งผลลัพธ์ ตัวเดียวกันที่รันคนละภาพต้นทาง
+    # อยู่กลุ่มเดียวกัน จะได้เทียบ "ลบลายน้ำแล้วดีขึ้นไหม" ได้โดยไม่ต้องสลับแท็บ
+    group: str = ""
+    variant: str = ""  # ป้ายบนการ์ดในกลุ่ม เช่น ภาพดิบ / ลบลายน้ำ
 
 
 def encode_image(path: Path, max_width: int = VIEWER_MAX_WIDTH) -> tuple[str, int, int]:
@@ -87,6 +91,8 @@ def build_html(
         "engines": [
             {
                 "name": e.name,
+                "group": e.group or e.name,
+                "variant": e.variant,
                 "badges": e.badges,
                 "notes": e.notes,
                 "hasBoxes": e.has_boxes,
@@ -177,6 +183,16 @@ _TEMPLATE = r"""
   .cols { display:flex; gap:.75rem; align-items:flex-start;
           overflow-x:auto; padding-bottom:.5rem; }
   .cols > div { flex:1 0 340px; min-width:340px; }
+
+  /* กลุ่มตระกูล engine — หัวกลุ่มติดขอบบนตอนเลื่อน จะได้รู้ตลอดว่าดูตัวไหนอยู่ */
+  .grp { margin-bottom:1.1rem; }
+  .grphead { position:sticky; top:0; z-index:2; display:flex; align-items:center;
+             gap:.5rem; font-family:var(--mono); font-size:12px; font-weight:700;
+             color:var(--ink); background:var(--surface);
+             padding:.35rem 0 .45rem; border-bottom:2px solid var(--accent);
+             margin-bottom:.55rem; }
+  .grpcount { font-weight:500; font-size:11px; color:var(--ink-faint);
+              border:1px solid var(--border); border-radius:999px; padding:.1rem .5rem; }
 
   .card { border:1px solid var(--border); border-radius:12px; padding:.7rem .85rem;
           margin-bottom:.7rem; background:var(--surface); }
@@ -363,7 +379,30 @@ function engineCard(e) {
   const lines  = e.lines.length
     ? e.lines.map(lineHTML).join('')
     : '<div class="empty">ไม่มีบรรทัด</div>';
-  return `<div class="card"><div class="lab">${e.name}</div>${badges}${notes}${noBox}${lines}</div>`;
+  // ในกลุ่มเดียวกันชื่อ engine ซ้ำกันทุกใบ ต่างกันแค่ภาพต้นทาง จึงขึ้นตัวนั้นแทน
+  const label = e.variant || e.name;
+  return `<div class="card"><div class="lab">${label}</div>${badges}${notes}${noBox}${lines}</div>`;
+}
+
+// จัดกลุ่มตามตระกูล engine โดยคงลำดับเดิมไว้
+// ตระกูลเดียวกันต่างกันแค่ภาพต้นทาง (ดิบ / ลบลายน้ำ) ซึ่งเป็นคำถามหลัก
+// ของงานนี้พอดี วางคู่กันจึงเทียบได้ทันทีโดยไม่ต้องสลับแท็บไปมา
+function groupEngines() {
+  const order = [];
+  const map = new Map();
+  DATA.engines.forEach(e => {
+    const g = e.group || e.name;
+    if (!map.has(g)) { map.set(g, []); order.push(g); }
+    map.get(g).push(e);
+  });
+  return order.map(g => ({name: g, items: map.get(g)}));
+}
+
+function groupBlock(g) {
+  const cards = g.items.map(e => `<div>${engineCard(e)}</div>`).join('');
+  return `<div class="grp"><div class="grphead">${g.name}` +
+    `<span class="grpcount">${g.items.length} แบบ</span></div>` +
+    `<div class="cols">${cards}</div></div>`;
 }
 
 function truthCard() {
@@ -374,9 +413,13 @@ function truthCard() {
 }
 
 function render() {
+  const groups = groupEngines();
+  if (active >= groups.length) active = 0;
+
+  // แท็บเป็นตระกูล ไม่ใช่ engine ทีละตัว จาก 11 แท็บเหลือ 6
   tabsEl.innerHTML = mode === 'single'
-    ? DATA.engines.map((e,i) =>
-        `<button class="${i===active?'on':''}" data-i="${i}">${e.name}</button>`).join('')
+    ? groups.map((g,i) =>
+        `<button class="${i===active?'on':''}" data-i="${i}">${g.name}</button>`).join('')
     : '';
   tabsEl.style.display = mode === 'single' ? 'flex' : 'none';
 
@@ -389,10 +432,8 @@ function render() {
   // เฉลยอยู่ล่างสุด — ผลของ engine ที่กำลังตรวจควรอยู่ใกล้ขอบบนมากที่สุด
   // เพราะเป็นสิ่งที่ต้องกวาดสายตาเทียบกับรูปฝั่งซ้ายตลอดเวลา
   scrollEl.innerHTML = mode === 'single'
-    ? engineCard(DATA.engines[active]) + truthCard()
-    : `<div class="cols">` +
-        DATA.engines.map(e => `<div>${engineCard(e)}</div>`).join('') +
-      `</div>` + truthCard();
+    ? groupBlock(groups[active]) + truthCard()
+    : groups.map(groupBlock).join('') + truthCard();
 }
 
 tabsEl.onclick = e => {
