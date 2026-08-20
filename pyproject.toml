@@ -45,6 +45,24 @@ all = [
 [dependency-groups]
 dev = ["pytest>=8.0"]
 
+# torch ต้องดึงจาก index ของ PyTorch ไม่ใช่ PyPI
+# ถ้าประกาศแค่ "torch>=2.8" เฉย ๆ PyPI จะให้ wheel ตัว CPU บน Windows เสมอ
+# แล้ว typhoon-2b กับ thai-trocr จะรายงานว่า "ต้องมี GPU" ทั้งที่เครื่องมีการ์ดอยู่
+# ส่วน easyocr กับ paddle จะรันได้แต่ตกไปใช้ CPU ซึ่งช้ากว่ามาก
+# เคยเจอมาแล้วรอบหนึ่ง: uv sync ลง 2.13.0+cpu ทับ 2.8.0+cu129 ที่ใช้อยู่
+#
+# ใช้ cu130 เพราะแต่ละ index มี Windows wheel ไปไม่เท่ากัน (ตรวจ cp312 win_amd64)
+#   cu126 -> 2.13.0    cu128 -> 2.11.0    cu129 -> 2.9.0    cu130 -> 2.13.0
+# cu129 ที่เคยใช้ตันอยู่ที่ 2.9.0 บน Windows ส่วน cu130 ตามเวอร์ชันล่าสุดได้
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true  # ดึงจาก index นี้เฉพาะแพ็กเกจที่ระบุไว้ข้างล่าง ไม่ใช่ทั้งหมด
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
