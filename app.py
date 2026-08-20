@@ -271,62 +271,75 @@ def start_scan(engines: list[str], docs: list[str], *, clean: bool, redo: bool) 
     )
 
 
+def short_doc(name: str, limit: int = 22) -> str:
+    """ชื่อเอกสารสั้นพอใส่แถบข้างได้ ชื่อจริงบางอันยาว 40 ตัว"""
+    return name if len(name) <= limit else name[: limit - 1] + "…"
+
+
 def scan_panel(pages: list[PageInfo]) -> None:
-    """แผงสั่งสแกนในแถบข้าง"""
+    """แผงสั่งสแกนในแถบข้าง
+
+    ตั้งใจให้ค่าเริ่มต้นคือ "ทุกอย่าง" โดยไม่ต้องเลือก เพราะถ้า default
+    เป็นรายการเต็ม multiselect จะกาง chip ทุกตัวออกมาเรียงลง กินครึ่งแถบ
+    ทั้งที่ส่วนใหญ่กดรันทั้งชุดอยู่แล้ว ว่าง = ทั้งหมด
+    """
     status = progress.load()
     active = run_is_active(status)
 
-    st.markdown("**สั่งสแกน**")
-    with st.container(border=True):
-        try:
-            ready, blocked = [], {}
-            for engine in get_engines(None):
-                ok, why = engine.available()
-                if ok:
-                    ready.append(engine.name)
-                else:
-                    blocked[engine.name] = why
-        except Exception as exc:  # engine ที่ import ไม่ผ่านไม่ควรทำหน้าเว็บล่ม
-            st.error(f"อ่านรายชื่อ engine ไม่ได้: {exc}")
-            return
+    try:
+        ready, blocked = [], {}
+        for engine in get_engines(None):
+            ok, why = engine.available()
+            if ok:
+                ready.append(engine.name)
+            else:
+                blocked[engine.name] = why
+    except Exception as exc:  # engine ที่ import ไม่ผ่านไม่ควรทำหน้าเว็บล่ม
+        st.error(f"อ่านรายชื่อ engine ไม่ได้: {exc}")
+        return
 
-        # เสนอเฉพาะตัวที่พร้อมจริง ไม่งั้นผู้ใช้เลือกไปแล้วตัวรันข้ามเงียบ ๆ
-        # เห็นแต่ว่า "กดแล้วไม่มีอะไรเกิดขึ้น"
-        if blocked:
-            with st.expander(f"ยังใช้ไม่ได้ {len(blocked)} ตัว"):
-                for name, why in sorted(blocked.items()):
-                    st.caption(f"`{name}` — {why}")
-        names = sorted(ready)
+    names = sorted(ready)
+    docs = sorted({p.doc_name for p in pages})
+    count = Counter(p.doc_name for p in pages)
 
-        docs = sorted({p.doc_name for p in pages})
-        count = Counter(p.doc_name for p in pages)
-        pick_docs = st.multiselect(
-            "เอกสาร",
-            docs,
-            default=docs,
-            format_func=lambda d: f"{d} ({count[d]} หน้า)",
-        )
-        pick_engines = st.multiselect("engine", names, default=names)
-        clean = st.checkbox("ใช้ภาพที่ลบลายน้ำแล้ว", value=False)
-        redo = st.checkbox("อ่านใหม่แม้มีผลเก่า", value=False)
+    st.subheader("สั่งสแกน", divider="gray")
+    pick_docs = st.multiselect(
+        "เอกสาร",
+        docs,
+        placeholder=f"ทุกเอกสาร ({len(docs)})",
+        format_func=lambda d: f"{short_doc(d)} · {count[d]}",
+    )
+    pick_engines = st.multiselect(
+        "engine", names, placeholder=f"ทุก engine ที่พร้อม ({len(names)})"
+    )
 
-        total = sum(count[d] for d in pick_docs) * len(pick_engines)
-        st.caption(f"จะอ่าน {total:,} ครั้ง (หน้า × engine)")
+    a, b = st.columns(2)
+    clean = a.checkbox("ภาพลบลายน้ำ", value=False)
+    redo = b.checkbox("อ่านใหม่", value=False)
 
-        # ปุ่มต้องโผล่เสมอแม้กดไม่ได้ ถ้า return ทิ้งตอนไม่มี engine
-        # ผู้ใช้จะหาปุ่มไม่เจอแล้วนึกว่าฟีเจอร์ไม่มีอยู่จริง
-        if active:
-            st.button("กำลังสแกนอยู่…", disabled=True, use_container_width=True)
-        elif not names:
-            st.button("เริ่มสแกน", disabled=True, use_container_width=True)
-            st.caption("ยังไม่มี engine ที่พร้อมใช้ — `uv sync --extra all`")
-        elif st.button(
-            "เริ่มสแกน", type="primary", use_container_width=True,
-            disabled=not (pick_docs and pick_engines),
-        ):
-            start_scan(pick_engines, pick_docs, clean=clean, redo=redo)
+    use_docs = pick_docs or docs
+    use_engines = pick_engines or names
+    total = sum(count[d] for d in use_docs) * len(use_engines)
+
+    # ปุ่มต้องโผล่เสมอแม้กดไม่ได้ ถ้า return ทิ้งตอนไม่มี engine
+    # ผู้ใช้จะหาปุ่มไม่เจอแล้วนึกว่าฟีเจอร์ไม่มีอยู่จริง
+    if active:
+        st.button("กำลังสแกนอยู่…", disabled=True, use_container_width=True)
+    elif not names:
+        st.button("เริ่มสแกน", disabled=True, use_container_width=True)
+        st.caption("ยังไม่มี engine พร้อมใช้ — `uv sync --extra all`")
+    else:
+        st.caption(f"{total:,} ครั้ง · {len(use_docs)} เอกสาร × {len(use_engines)} engine")
+        if st.button("เริ่มสแกน", type="primary", use_container_width=True):
+            start_scan(use_engines, use_docs, clean=clean, redo=redo)
             st.success("สั่งรันแล้ว ดูความคืบหน้าที่แถบด้านบน")
             st.rerun()
+
+    # ข้อมูลอ้างอิง ไม่ใช่ตัวควบคุม จึงอยู่ล่างสุดและพับไว้
+    if blocked:
+        with st.expander(f"อีก {len(blocked)} engine ยังใช้ไม่ได้"):
+            for name, why in sorted(blocked.items()):
+                st.caption(f"**{name}** — {why}")
 
 
 def drop_watermarks(results: dict) -> dict:
@@ -980,7 +993,10 @@ def view_summary(pages: list[PageInfo], results: dict) -> None:
 def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     st.title("ตรวจผล OCR ภาษาไทย")
-    st.caption("เทียบผล OCR แต่ละตัวกับเฉลยทีละบรรทัด — ไม่รัน OCR ในหน้านี้ อ่านผลจากไฟล์ที่ run_bench.py เก็บไว้เท่านั้น")
+    st.caption(
+        "เทียบผล OCR แต่ละตัวกับเฉลยทีละบรรทัด — สั่งสแกนได้จากแถบซ้าย "
+        "ตัวรันเป็นคนละโปรเซส ปิดหน้านี้ระหว่างรันได้"
+    )
 
     pages = cached_pages()
     if not pages:
@@ -991,27 +1007,23 @@ def main() -> None:
     truth = load_truth()
 
     with st.sidebar:
-        st.markdown("**สรุปชุดข้อมูล**")
-        with st.container(border=True):
-            c1, c2 = st.columns(2)
-            c1.metric("หน้าทั้งหมด", len(pages))
-            c2.metric("มีเฉลยแล้ว", len(truth))
-            c3, c4 = st.columns(2)
-            c3.metric("engine ที่มีผล", len(results))
-            digits_in_truth = sum(
-                t.text.count(d) for t in truth.values() for d in THAI_DIGITS
-            )
-            c4.metric("เลขไทยในเฉลย", f"{digits_in_truth:,}")
+        # เมตริกแถวเดียวสามช่อง สี่ช่องสองแถวสูงเกินไปสำหรับแถบแคบ ๆ
+        # ส่วนที่เหลือเป็นตัวเลขอ้างอิง ยัดเป็น caption บรรทัดเดียวพอ
+        st.subheader("ชุดข้อมูล", divider="gray")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("หน้า", len(pages))
+        c2.metric("มีเฉลย", len(truth))
+        c3.metric("engine", len(results))
+
+        digits_in_truth = sum(
+            t.text.count(d) for t in truth.values() for d in THAI_DIGITS
+        )
+        st.caption(
+            f"เลขไทยในเฉลย {digits_in_truth:,} ตัว · "
+            f"ยังไม่มีเฉลย {len(pages) - len(truth)} หน้า"
+        )
         if not results:
             st.warning("ยังไม่มีผล OCR — กดสแกนด้านล่าง")
-
-        missing = sorted({p.doc_name for p in pages if p.page_id not in truth})
-        if missing:
-            st.info(
-                "เอกสารที่ยังไม่มีเฉลย จึงไม่โผล่ในแท็บเปรียบเทียบ:\n\n- "
-                + "\n- ".join(missing)
-                + "\n\nไปสร้างที่แท็บ 'ทำเฉลย'"
-            )
 
         scan_panel(pages)
 
