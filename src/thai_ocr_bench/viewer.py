@@ -184,15 +184,21 @@ _TEMPLATE = r"""
           overflow-x:auto; padding-bottom:.5rem; }
   .cols > div { flex:1 0 340px; min-width:340px; }
 
-  /* กลุ่มตระกูล engine — หัวกลุ่มติดขอบบนตอนเลื่อน จะได้รู้ตลอดว่าดูตัวไหนอยู่ */
-  .grp { margin-bottom:1.1rem; }
-  .grphead { position:sticky; top:0; z-index:2; display:flex; align-items:center;
-             gap:.5rem; font-family:var(--mono); font-size:12px; font-weight:700;
-             color:var(--ink); background:var(--surface);
-             padding:.35rem 0 .45rem; border-bottom:2px solid var(--accent);
-             margin-bottom:.55rem; }
-  .grpcount { font-weight:500; font-size:11px; color:var(--ink-faint);
-              border:1px solid var(--border); border-radius:999px; padding:.1rem .5rem; }
+  /* กลุ่มตระกูล engine
+     เคยทำหัวกลุ่มเป็น sticky เพื่อให้รู้ตลอดว่าดูตัวไหนอยู่ แต่ผลคือมันลอย
+     ไปทับบรรทัดสุดท้ายของกลุ่มก่อนหน้าตอนเลื่อน ซึ่งบังข้อความที่กำลังอ่านอยู่
+     แลกไม่คุ้ม เอาออกแล้วทำให้หัวติดเป็นเนื้อเดียวกับกลุ่มของตัวเองแทน
+     กล่องครอบทั้งกลุ่มทำให้เห็นขอบเขตชัดโดยไม่ต้องพึ่ง sticky */
+  .grp { margin-bottom:1.4rem; border:1px solid var(--border); border-radius:12px;
+         overflow:hidden; background:var(--surface-2); }
+  .grphead { display:flex; align-items:center; gap:.5rem;
+             font-family:var(--mono); font-size:12px; font-weight:700;
+             color:#fff; background:var(--accent);
+             padding:.45rem .75rem; }
+  .grp > .cols { padding:.7rem .7rem 0; }
+  .grpcount { font-weight:500; font-size:11px; color:#fff;
+              background:rgba(255,255,255,.22); border-radius:999px;
+              padding:.1rem .5rem; }
 
   .card { border:1px solid var(--border); border-radius:12px; padding:.7rem .85rem;
           margin-bottom:.7rem; background:var(--surface); }
