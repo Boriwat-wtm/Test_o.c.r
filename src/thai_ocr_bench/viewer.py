@@ -256,6 +256,11 @@ _TEMPLATE = r"""
       <button data-mode="single" class="on">ดูทีละตัว</button>
       <button data-mode="compare">เทียบพร้อมกัน</button>
     </div>
+    <div class="seg" id="varseg">
+      <button data-var="both" class="on">ทั้งสอง</button>
+      <button data-var="ภาพดิบ">ภาพดิบ</button>
+      <button data-var="ลบลายน้ำแล้ว">ลบลายน้ำ</button>
+    </div>
     <button class="btn" id="copybtn">คัดลอกข้อความ</button>
   </div>
 
@@ -366,7 +371,7 @@ function showBox(box) {
 // ── ฝั่งผลลัพธ์ ────────────────────────────────────────────────────────
 const tabsEl = document.getElementById('tabs');
 const scrollEl = document.getElementById('scroll');
-let mode = 'single', active = 0;
+let mode = 'single', active = 0, variant = 'both';
 
 document.getElementById('ptitle').textContent = DATA.pageTitle;
 
@@ -402,6 +407,9 @@ function groupEngines() {
   const order = [];
   const map = new Map();
   DATA.engines.forEach(e => {
+    // กรองตามภาพต้นทางที่เลือกไว้ ตัวที่ไม่มี variant (engine ที่รันแบบเดียว)
+    // ต้องไม่หายไปเวลาเลือกกรอง ไม่งั้นกลุ่มนั้นว่างเปล่าโดยไม่มีเหตุผล
+    if (variant !== 'both' && e.variant && e.variant !== variant) return;
     const g = e.group || e.name;
     if (!map.has(g)) { map.set(g, []); order.push(g); }
     map.get(g).push(e);
@@ -461,6 +469,20 @@ document.getElementById('modeseg').onclick = e => {
     .forEach(x => x.classList.toggle('on', x === b));
   render();
 };
+
+document.getElementById('varseg').onclick = e => {
+  const b = e.target.closest('button[data-var]');
+  if (!b) return;
+  variant = b.dataset.var;
+  document.querySelectorAll('#varseg button')
+    .forEach(x => x.classList.toggle('on', x === b));
+  render();
+};
+
+// ซ่อนตัวเลือกภาพต้นทางถ้าหน้านี้มีแบบเดียว กดไปก็ไม่มีอะไรเปลี่ยน
+if (new Set(DATA.engines.map(e => e.variant).filter(Boolean)).size < 2) {
+  document.getElementById('varseg').style.display = 'none';
+}
 
 // hover บรรทัด -> วาดกรอบบนรูป (ใช้ event delegation ครั้งเดียว
 // ไม่ผูก listener รายบรรทัด เพราะบางหน้ามีเป็นร้อยบรรทัด)
