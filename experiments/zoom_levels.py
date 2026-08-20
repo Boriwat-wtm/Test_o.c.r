@@ -35,13 +35,14 @@ sys.path.insert(0, "src")
 
 from thai_ocr_bench.config import IMAGE_DIR, SOURCE_DIR  # noqa: E402
 from thai_ocr_bench.engines import get_engines  # noqa: E402
-from thai_ocr_bench.metrics import page_cer  # noqa: E402
+from thai_ocr_bench.metrics import align_lines, page_cer  # noqa: E402
 from thai_ocr_bench.render import doc_id_for, load_pages  # noqa: E402
-from thai_ocr_bench.thai_text import THAI_DIGITS  # noqa: E402
+from thai_ocr_bench.thai_text import THAI_DIGITS, normalize  # noqa: E402
 from thai_ocr_bench.truth import load as load_truth  # noqa: E402
 
 SCALES = (1, 2, 4)
 OUT_DIR = Path("data/zoom_test")
+LOG_DIR = Path("results/zoom_diff")
 
 # x4 ของหน้า A4 ที่ 300 DPI คือ 139 ล้านพิกเซล เกินเพดานกันภาพระเบิดของ Pillow
 # ปลดได้เพราะภาพมาจากไฟล์ที่เราสร้างเองในเครื่อง ไม่ใช่ของที่รับมาจากภายนอก
@@ -92,6 +93,67 @@ def make_variants(page_id: str, base_dpi: int) -> list[tuple[int, Path, str, tup
     return out
 
 
+def per_truth_line(truth_lines: list[str], pred_lines: list[str]) -> dict[int, tuple[str, float]]:
+    """เฉลยบรรทัดที่ i -> (ข้อความที่ OCR อ่านได้, CER ของบรรทัดนั้น)
+
+    ใช้ align_lines ตัวเดียวกับที่หน้าเว็บใช้คิดคะแนน จะได้ไม่มีสองมาตรฐาน
+    บรรทัดที่ OCR ไม่ได้อ่านเลยคืน CER 1.0 เพื่อให้เทียบกับระดับอื่นได้
+    """
+    score = align_lines(truth_lines, pred_lines)
+    out: dict[int, tuple[str, float]] = {}
+    matched = iter(score.matched)
+    for pair in score.pairs:
+        if pair.truth_index is None:
+            continue
+        if pair.pred_index is None:
+            out[pair.truth_index] = ("(ไม่ได้อ่านบรรทัดนี้)", 1.0)
+        else:
+            line = next(matched, None)
+            out[pair.truth_index] = (pair.pred, line.cer if line else 0.0)
+    return out
+
+
+def write_diff_log(
+    page_id: str, engine: str, truth_lines: list[str],
+    by_scale: dict[int, list[str]], path: Path,
+) -> int:
+    """เขียน log ว่าแต่ละระดับการขยายอ่านต่างกันตรงบรรทัดไหน คืนจำนวนบรรทัดที่ต่าง
+
+    ตอบคำถามที่ตัวเลข CER รวมตอบไม่ได้ — รู้ว่าดีขึ้น 1% แต่ไม่รู้ว่าดีขึ้นตรงไหน
+    และดีขึ้นเพราะอ่านคำที่เคยผิดได้ถูก หรือเพราะบังเอิญผิดอีกแบบที่ใกล้เฉลยกว่า
+    """
+    scales = sorted(by_scale)
+    base = scales[0]
+    per_scale = {s: per_truth_line(truth_lines, by_scale[s]) for s in scales}
+
+    rows = []
+    for i, truth in enumerate(truth_lines):
+        texts = {s: per_scale[s].get(i, ("(ไม่ได้อ่าน)", 1.0)) for s in scales}
+        if len({normalize(t) for t, _ in texts.values()}) == 1:
+            continue  # ทุกระดับอ่านได้เหมือนกัน ไม่ต้องรายงาน
+        rows.append((i, truth, texts))
+
+    with path.open("w", encoding="utf-8") as fh:
+        fh.write(f"# {page_id} · {engine}\n\n")
+        fh.write(
+            f"เทียบผลของแต่ละตัวคูณกับเฉลยทีละบรรทัด "
+            f"แสดงเฉพาะบรรทัดที่อ่านได้ไม่เหมือนกัน "
+            f"({len(rows)} จาก {len(truth_lines)} บรรทัด)\n\n"
+        )
+        for i, truth, texts in rows:
+            best = min(texts.values(), key=lambda v: v[1])[1]
+            fh.write(f"## บรรทัดที่ {i + 1}\n\n")
+            fh.write(f"เฉลย  {truth}\n\n")
+            for s in scales:
+                text, cer = texts[s]
+                mark = " <-- ดีที่สุด" if cer == best and cer < texts[base][1] else ""
+                if s == base:
+                    mark = " (ฐาน)"
+                fh.write(f"  x{s}  CER {cer:6.1%}  {text}{mark}\n")
+            fh.write("\n")
+    return len(rows)
+
+
 def stats(lines: list[str]) -> tuple[int, int, int, int]:
     text = "".join(lines)
     return (
@@ -139,7 +201,11 @@ def main() -> None:
     print(header)
     print("-" * len(header) * 2)
 
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    written = []
+
     for engine in engines:
+        by_scale: dict[int, list[str]] = {}
         for scale, path, _, _ in variants:
             started = time.perf_counter()
             result = engine.run(path, f"{args.page}_x{scale}")
@@ -150,6 +216,7 @@ def main() -> None:
                 continue
 
             lines = [ln.text for ln in result.lines]
+            by_scale[scale] = lines
             n_lines, chars, thai, arabic = stats(lines)
             row = f"{engine.name:<16}{'x' + str(scale):>6}{n_lines:>8}{chars:>10}"
             row += f"{thai:>8}{arabic:>8}{elapsed:>8.1f}"
@@ -157,8 +224,18 @@ def main() -> None:
                 cer = page_cer(truth.lines, lines)
                 row += f"{cer:>9.2%}" if cer is not None else f"{'-':>10}"
             print(row)
+
+        # log รายบรรทัดต้องมีเฉลยถึงจะบอกได้ว่าที่ต่างกันนั้นดีขึ้นหรือแย่ลง
+        if truth and len(by_scale) > 1:
+            log = LOG_DIR / f"{args.page}_{engine.name}.md"
+            n = write_diff_log(args.page, engine.name, truth.lines, by_scale, log)
+            written.append((log, n))
         print()
 
+    for log, n in written:
+        print(f"log รายบรรทัด ({n} บรรทัดที่อ่านต่างกัน): {log}")
+    if truth is None:
+        print("หน้านี้ไม่มีเฉลย จึงไม่ได้เขียน log รายบรรทัด")
     print(f"ภาพที่ใช้ทดสอบเก็บไว้ที่ {OUT_DIR}/ ลบทิ้งได้")
 
 
