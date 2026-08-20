@@ -301,10 +301,27 @@ def scan_status() -> None:
         return
 
     if status.finished:
+        # done_engines นับตัวที่ถูกข้ามด้วย ถ้าดูแค่ตัวเลขนี้จะขึ้นว่า
+        # "เสร็จแล้ว 100%" ทั้งที่ไม่ได้อ่านอะไรเลยสักหน้า ต้องดูประวัติรอบล่าสุด
+        # ว่ามี engine ไหนได้ทำงานจริงบ้าง
+        recent = history.load(limit=1)
+        last = recent[0] if recent else {}
+        engines = last.get("engines", [])
+        ran = [e for e in engines if not e.get("skipped")]
+
+        if engines and not ran:
+            st.warning(
+                f"ไม่ได้อ่านอะไรเลย — ทั้ง {len(engines)} engine มีผลของหน้าเหล่านี้"
+                " อยู่แล้ว ถ้าต้องการอ่านซ้ำให้ติ๊ก **อ่านใหม่** ก่อนกด"
+            )
+            return
+
         note = f" · {status.failures} หน้าพัง" if status.failures else ""
+        skipped = len(engines) - len(ran)
+        skip_note = f" · ข้าม {skipped} ตัวที่มีผลแล้ว" if skipped else ""
         st.success(
-            f"เสร็จแล้ว 100% — {len(status.done_engines)} engine × "
-            f"{status.pages_total} หน้า{note}"
+            f"เสร็จแล้ว 100% — {len(ran) or len(status.done_engines)} engine × "
+            f"{status.pages_total} หน้า{note}{skip_note}"
         )
         # ผลใหม่จะยังไม่โผล่จนกว่าหน้าจะโหลดใหม่ เพราะ store.load() ถูกเรียก
         # ตอนต้น main() ไปแล้ว ให้ปุ่มไว้แทนการ rerun เองเพื่อไม่ให้จอกระตุก
@@ -331,7 +348,30 @@ def short_doc(name: str, limit: int = 22) -> str:
     return name if len(name) <= limit else name[: limit - 1] + "…"
 
 
-def scan_panel(pages: list[PageInfo]) -> None:
+def pending_reads(
+    results: dict, pages: list[PageInfo], docs: list[str], engines: list[str],
+    *, clean: bool, redo: bool,
+) -> tuple[int, int]:
+    """(จำนวนที่จะอ่านจริง, จำนวนที่ข้ามเพราะมีผลแล้ว)
+
+    ใช้กติกาเดียวกับ run_bench.py คือข้ามหน้าที่มีผลอยู่แล้วเว้นแต่สั่ง --redo
+    ต้องคำนวณฝั่งหน้าเว็บด้วย ไม่งั้นผู้ใช้กดแล้วจบใน 0 วินาทีโดยไม่รู้ว่าทำไม
+    """
+    ids = [p.page_id for p in pages if p.doc_name in set(docs)]
+    total = len(ids) * len(engines)
+    if redo:
+        return total, 0
+    suffix = "+clean" if clean else ""
+    done = sum(
+        1
+        for name in engines
+        for pid in ids
+        if pid in results.get(name + suffix, {})
+    )
+    return total - done, done
+
+
+def scan_panel(pages: list[PageInfo], results: dict) -> None:
     """แผงสั่งสแกนในแถบข้าง
 
     ตั้งใจให้ค่าเริ่มต้นคือ "ทุกอย่าง" โดยไม่ต้องเลือก เพราะถ้า default
@@ -374,7 +414,9 @@ def scan_panel(pages: list[PageInfo]) -> None:
 
     use_docs = pick_docs or docs
     use_engines = pick_engines or names
-    total = sum(count[d] for d in use_docs) * len(use_engines)
+    todo, skip = pending_reads(
+        results, pages, use_docs, use_engines, clean=clean, redo=redo
+    )
 
     # ปุ่มต้องโผล่เสมอแม้กดไม่ได้ ถ้า return ทิ้งตอนไม่มี engine
     # ผู้ใช้จะหาปุ่มไม่เจอแล้วนึกว่าฟีเจอร์ไม่มีอยู่จริง
@@ -383,8 +425,13 @@ def scan_panel(pages: list[PageInfo]) -> None:
     elif not names:
         st.button("เริ่มสแกน", disabled=True, use_container_width=True)
         st.caption("ยังไม่มี engine พร้อมใช้ — `uv sync --extra all`")
+    elif todo == 0:
+        # กดไปก็ข้ามหมดแล้วจบใน 0 วินาที ต้องบอกก่อนไม่ใช่ปล่อยให้กดแล้วงง
+        st.button("เริ่มสแกน", disabled=True, use_container_width=True)
+        st.caption(f"มีผลครบแล้วทั้ง {skip:,} ครั้ง — ติ๊ก **อ่านใหม่** ถ้าต้องการอ่านซ้ำ")
     else:
-        st.caption(f"{total:,} ครั้ง · {len(use_docs)} เอกสาร × {len(use_engines)} engine")
+        note = f" · ข้าม {skip:,} ที่มีผลแล้ว" if skip else ""
+        st.caption(f"จะอ่าน {todo:,} ครั้ง{note}")
         if st.button("เริ่มสแกน", type="primary", use_container_width=True):
             start_scan(use_engines, use_docs, clean=clean, redo=redo)
             st.rerun()
@@ -1207,7 +1254,7 @@ def main() -> None:
         if not results:
             st.warning("ยังไม่มีผล OCR — กดสแกนด้านล่าง")
 
-        scan_panel(pages)
+        scan_panel(pages, results)
 
     progress_banner(len(pages))
 
