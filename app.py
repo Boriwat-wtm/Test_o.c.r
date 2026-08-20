@@ -18,7 +18,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from thai_ocr_bench import progress, store
+from thai_ocr_bench import history, progress, store
 from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR
 from thai_ocr_bench.engines.base import get_engines
 from thai_ocr_bench.metrics import (
@@ -266,9 +266,20 @@ def start_scan(engines: list[str], docs: list[str], *, clean: bool, redo: bool) 
     if redo:
         cmd.append("--redo")
 
+    # ต่อท้าย ไม่ทับ — เดิมเปิดด้วย "w" ทำให้ log ของรอบก่อนหายทุกครั้งที่กดสแกน
+    # ตอนไล่หาสาเหตุว่ารอบไหนพังเพราะอะไรจึงไม่เหลืออะไรให้ดู
     log = RESULTS_DIR / "run_bench.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    handle = log.open("w", encoding="utf-8")
+    handle = log.open("a", encoding="utf-8")
+    handle.write(
+        f"\n{'=' * 70}\n"
+        f"เริ่มรอบใหม่ {history.now_iso()}\n"
+        f"  เอกสาร {', '.join(docs)}\n"
+        f"  engine {', '.join(engines)}"
+        f"{' · ภาพลบลายน้ำ' if clean else ''}{' · อ่านใหม่' if redo else ''}\n"
+        f"{'=' * 70}\n"
+    )
+    handle.flush()
     # DETACHED_PROCESS ไม่ให้ตัวรันตายตาม Streamlit ตอนกด Ctrl+C หรือรีโหลด
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     subprocess.Popen(
@@ -1039,6 +1050,73 @@ def view_summary(pages: list[PageInfo], results: dict) -> None:
             st.json({k: v for k, v in meta["versions"].items() if v})
 
 
+# ── หน้าประวัติการรัน ────────────────────────────────────────────────────
+def view_history() -> None:
+    st.subheader("ประวัติการรัน")
+    st.caption(
+        "หนึ่งแถวคือหนึ่งรอบที่กดสแกน เรียงจากรอบล่าสุดลงไป "
+        "เก็บที่ `results/run_history.jsonl` ต่อท้ายอย่างเดียว ไม่เขียนทับ"
+    )
+
+    rows = history.load()
+    if not rows:
+        st.info(
+            "ยังไม่มีประวัติ — เริ่มบันทึกตั้งแต่รอบถัดไปที่กดสแกน "
+            "รอบก่อนหน้านี้ไม่ได้ถูกเก็บไว้เพราะยังไม่มีระบบนี้"
+        )
+        return
+
+    st.caption(f"ทั้งหมด {len(rows)} รอบ")
+    for i, run in enumerate(rows):
+        no = len(rows) - i  # รอบที่ 1 คือรอบแรกสุดตามลำดับเวลา
+        stamp = run.get("started_at", "?").replace("T", " ").replace("+00:00", "")
+        ok = run.get("completed", False)
+        head = f"{'✅' if ok else '⚠️'} รอบที่ {no} · {stamp} · {history.summarize(run)}"
+
+        with st.expander(head, expanded=(i == 0)):
+            flags = []
+            if run.get("clean"):
+                flags.append("ใช้ภาพลบลายน้ำ")
+            if run.get("redo"):
+                flags.append("อ่านใหม่ทับของเก่า")
+            if not ok:
+                flags.append("**รอบนี้ไม่จบ — หยุดกลางคัน**")
+            st.markdown(
+                f"**เอกสาร** {' · '.join(run.get('docs', [])) or '-'}  \n"
+                f"**หน้า** {run.get('pages', 0)}"
+                + (f"  \n**หมายเหตุ** {' · '.join(flags)}" if flags else "")
+            )
+
+            table = []
+            for e in run.get("engines", []):
+                if e.get("skipped"):
+                    table.append(
+                        {"engine": e["name"], "หน้า": "-", "บรรทัด": "-",
+                         "พัง": "-", "วินาที": "-", "สถานะ": "ข้าม (มีผลครบแล้ว)"}
+                    )
+                else:
+                    table.append(
+                        {
+                            "engine": e["name"],
+                            "หน้า": e.get("pages", 0),
+                            "บรรทัด": f"{e.get('lines', 0):,}",
+                            "พัง": e.get("failures", 0),
+                            "วินาที": f"{e.get('seconds', 0):.1f}",
+                            "สถานะ": "เสร็จ",
+                        }
+                    )
+            if table:
+                st.dataframe(table, use_container_width=True, hide_index=True)
+            else:
+                st.caption("ไม่มี engine ไหนได้รันในรอบนี้")
+
+    log = RESULTS_DIR / "run_bench.log"
+    if log.exists():
+        with st.expander("log ดิบของตัวรัน (ท้ายไฟล์)"):
+            text = log.read_text(encoding="utf-8", errors="replace")
+            st.code(text[-8000:] or "(ว่าง)")
+
+
 # ── ประกอบหน้า ───────────────────────────────────────────────────────────
 def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
@@ -1080,7 +1158,14 @@ def main() -> None:
     progress_banner(len(pages))
 
     tabs = st.tabs(
-        ["🔍 เปรียบเทียบ", "⚠️ จุดน่าสงสัย", "📊 สรุปผล", "✏️ ทำเฉลย", "🖼️ ตรวจภาพ"]
+        [
+            "🔍 เปรียบเทียบ",
+            "⚠️ จุดน่าสงสัย",
+            "📊 สรุปผล",
+            "✏️ ทำเฉลย",
+            "🖼️ ตรวจภาพ",
+            "🧾 ประวัติการรัน",
+        ]
     )
     with tabs[0]:
         view_compare(pages, results)
@@ -1092,6 +1177,8 @@ def main() -> None:
         view_truth(pages, results)
     with tabs[4]:
         view_images(pages)
+    with tabs[5]:
+        view_history()
 
 
 if __name__ == "__main__":

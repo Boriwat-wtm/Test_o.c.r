@@ -17,7 +17,7 @@ import gc
 import time
 from datetime import datetime, timezone
 
-from thai_ocr_bench import progress, store
+from thai_ocr_bench import history, progress, store
 from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR
 from thai_ocr_bench.engines import get_engines
 from thai_ocr_bench.render import load_pages
@@ -99,6 +99,34 @@ def main() -> None:
     )
     progress.save(status)
 
+    # บันทึกรอบนี้ลงประวัติ — status.json เก็บแค่รอบปัจจุบันแล้วถูกทับ
+    # จึงตอบไม่ได้ว่ารอบก่อน ๆ รันอะไรไปบ้าง
+    run_started = time.perf_counter()
+    record: dict = {
+        "started_at": status.started_at,
+        "docs": sorted({p.doc_name for p in pages}),
+        "pages": len(pages),
+        "clean": bool(args.clean),
+        "redo": bool(args.redo),
+        "engines": [],
+    }
+
+    try:
+        _run_engines(ready, pages, results, status, record, args, image_dir, suffix)
+    finally:
+        # ต้องเขียนแม้พังกลางคัน ไม่งั้นรอบที่ล้มจะหายไปจากประวัติเงียบ ๆ
+        # ซึ่งเป็นรอบที่อยากรู้ที่สุดว่าเกิดอะไรขึ้น
+        record["finished_at"] = history.now_iso()
+        record["duration_s"] = time.perf_counter() - run_started
+        record["completed"] = status.finished
+        history.append(record)
+
+    print(f"เก็บผลไว้ที่ results/{store.RESULTS_FILE}")
+    print("ดูผลรายหน้า:  .venv\\Scripts\\streamlit.exe run app.py")
+
+
+def _run_engines(ready, pages, results, status, record, args, image_dir, suffix) -> None:
+    """วนรันทีละ engine — แยกออกมาเพื่อให้ main() ห่อด้วย try/finally ได้"""
     for engine in ready:
         key = engine.name + suffix
         pending = [
@@ -108,11 +136,13 @@ def main() -> None:
             print(f"[{key}] มีผลครบแล้ว ข้าม")
             status.done_engines.append(key)
             progress.save(status)
+            record["engines"].append({"name": key, "skipped": True})
             continue
 
         print(f"[{key}] {len(pending)} หน้า")
         started = time.perf_counter()
         failures = 0
+        lines_read = 0
 
         status.current_engine = key
         status.pages_done = 0
@@ -131,6 +161,7 @@ def main() -> None:
                 failures += 1
                 print(f"  {i}/{len(pending)} {page.page_id} พัง: {result.error}")
             else:
+                lines_read += len(result.lines)
                 pace = (result.core_ms or 0) / 1000
                 print(
                     f"  {i}/{len(pending)} {page.page_id}  "
@@ -145,6 +176,16 @@ def main() -> None:
         total = time.perf_counter() - started
         note = f" ({failures} หน้าพัง)" if failures else ""
         print(f"  รวม {total / 60:.1f} นาที{note}\n")
+
+        record["engines"].append(
+            {
+                "name": key,
+                "pages": len(pending),
+                "lines": lines_read,
+                "failures": failures,
+                "seconds": total,
+            }
+        )
 
         status.done_engines.append(key)
         status.current_engine = None
@@ -161,9 +202,6 @@ def main() -> None:
     status.current_engine = None
     status.current_page = None
     progress.save(status)
-
-    print(f"เก็บผลไว้ที่ results/{store.RESULTS_FILE}")
-    print("ดูผลรายหน้า:  .venv\\Scripts\\streamlit.exe run app.py")
 
 
 if __name__ == "__main__":
