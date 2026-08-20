@@ -40,6 +40,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="รัน OCR ทุกตัวแล้วเก็บผล")
     parser.add_argument("-e", "--engine", action="append", help="เจาะเฉพาะ engine นี้")
     parser.add_argument("--pages", type=int, help="จำกัดจำนวนหน้า")
+    parser.add_argument(
+        "--doc",
+        action="append",
+        help="เจาะเฉพาะเอกสารชื่อนี้ (ใส่ซ้ำได้) — --pages เอาแต่หน้าแรก ๆ "
+        "ซึ่งเป็นของเอกสารเดียวจนไม่ได้แตะไฟล์ที่เพิ่งเพิ่ม",
+    )
     parser.add_argument("--redo", action="store_true", help="อ่านใหม่แม้มีผลเก่า")
     parser.add_argument(
         "--clean",
@@ -58,6 +64,13 @@ def main() -> None:
     if not pages:
         print("ยังไม่มีภาพ รัน render_pages.py ก่อน")
         return
+    if args.doc:
+        wanted = set(args.doc)
+        unknown = wanted - {p.doc_name for p in pages}
+        if unknown:
+            print("ไม่รู้จักเอกสาร: " + ", ".join(sorted(unknown)))
+            return
+        pages = [p for p in pages if p.doc_name in wanted]
     if args.pages:
         pages = pages[: args.pages]
 

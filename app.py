@@ -10,13 +10,17 @@
 from __future__ import annotations
 
 import html
+import subprocess
+import sys
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
 
 from thai_ocr_bench import progress, store
-from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR
+from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR
+from thai_ocr_bench.engines.base import get_engines
 from thai_ocr_bench.metrics import (
     Span,
     align_lines,
@@ -218,8 +222,6 @@ def repeated_line(lines: list[str], threshold: int = 8) -> tuple[str, int] | Non
     เอกสารจริงไม่มีหน้าไหนที่บรรทัดเดียวกันซ้ำเกิน 8 ครั้ง ถ้าเจอแปลว่าโมเดลเสีย
     ไม่ใช่อ่านผิด ต้องบอกให้ชัดว่าผลหน้านี้ใช้เทียบไม่ได้
     """
-    from collections import Counter
-
     counts = Counter(ln.strip() for ln in lines if ln.strip())
     if not counts:
         return None
@@ -230,6 +232,99 @@ def repeated_line(lines: list[str], threshold: int = 8) -> tuple[str, int] | Non
 @st.cache_data(show_spinner=False)
 def cached_pages() -> list[PageInfo]:
     return load_pages()
+
+
+def run_is_active(status) -> bool:
+    """มีตัวรันทำงานอยู่จริงไหม — เพื่อไม่ให้กดสแกนซ้อนกันสองรอบ
+
+    ถือว่าจบแล้วถ้าไฟล์สถานะบอกว่า finished หรือค้างจนเกิน STALE_SECONDS
+    (ตัวรันตายกลางคันจะไม่ได้เขียน finished ให้ ปุ่มจะได้ไม่ล็อกค้าง)
+    """
+    return bool(status and not status.finished and not status.stale)
+
+
+def start_scan(engines: list[str], docs: list[str], *, clean: bool, redo: bool) -> None:
+    """สั่ง run_bench.py เป็นคนละโปรเซส แล้วปล่อยให้ progress_banner ตามสถานะเอง
+
+    ไม่รัน OCR ในโปรเซสของหน้าเว็บ เพราะ engine หนักตัวจะบล็อกหน้าจนหมุนค้าง
+    และ Streamlit รันสคริปต์ใหม่ทุกครั้งที่ผู้ใช้กดอะไร งานจะโดนตัดกลางคัน
+    ทั้งสองฝั่งคุยกันผ่าน results/run_status.json อยู่แล้ว จึงใช้ช่องทางเดิม
+    """
+    cmd = [sys.executable, str(Path(__file__).parent / "run_bench.py")]
+    for name in engines:
+        cmd += ["-e", name]
+    for name in docs:
+        cmd += ["--doc", name]
+    if clean:
+        cmd.append("--clean")
+    if redo:
+        cmd.append("--redo")
+
+    log = RESULTS_DIR / "run_bench.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    handle = log.open("w", encoding="utf-8")
+    # DETACHED_PROCESS ไม่ให้ตัวรันตายตาม Streamlit ตอนกด Ctrl+C หรือรีโหลด
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen(
+        cmd, stdout=handle, stderr=subprocess.STDOUT, cwd=log.parent.parent,
+        creationflags=flags,
+    )
+
+
+def scan_panel(pages: list[PageInfo]) -> None:
+    """แผงสั่งสแกนในแถบข้าง"""
+    status = progress.load()
+    active = run_is_active(status)
+
+    st.markdown("**สั่งสแกน**")
+    with st.container(border=True):
+        try:
+            ready, blocked = [], {}
+            for engine in get_engines(None):
+                ok, why = engine.available()
+                if ok:
+                    ready.append(engine.name)
+                else:
+                    blocked[engine.name] = why
+        except Exception as exc:  # engine ที่ import ไม่ผ่านไม่ควรทำหน้าเว็บล่ม
+            st.error(f"อ่านรายชื่อ engine ไม่ได้: {exc}")
+            return
+
+        # เสนอเฉพาะตัวที่พร้อมจริง ไม่งั้นผู้ใช้เลือกไปแล้วตัวรันข้ามเงียบ ๆ
+        # เห็นแต่ว่า "กดแล้วไม่มีอะไรเกิดขึ้น"
+        if blocked:
+            with st.expander(f"ยังใช้ไม่ได้ {len(blocked)} ตัว"):
+                for name, why in sorted(blocked.items()):
+                    st.caption(f"`{name}` — {why}")
+        if not ready:
+            st.warning("ยังไม่มี engine ที่พร้อมใช้ — `uv sync --extra all`")
+            return
+        names = sorted(ready)
+
+        docs = sorted({p.doc_name for p in pages})
+        count = Counter(p.doc_name for p in pages)
+        pick_docs = st.multiselect(
+            "เอกสาร",
+            docs,
+            default=docs,
+            format_func=lambda d: f"{d} ({count[d]} หน้า)",
+        )
+        pick_engines = st.multiselect("engine", names, default=names)
+        clean = st.checkbox("ใช้ภาพที่ลบลายน้ำแล้ว", value=False)
+        redo = st.checkbox("อ่านใหม่แม้มีผลเก่า", value=False)
+
+        total = sum(count[d] for d in pick_docs) * len(pick_engines)
+        st.caption(f"จะอ่าน {total:,} ครั้ง (หน้า × engine)")
+
+        if active:
+            st.button("กำลังสแกนอยู่…", disabled=True, use_container_width=True)
+        elif st.button(
+            "เริ่มสแกน", type="primary", use_container_width=True,
+            disabled=not (pick_docs and pick_engines),
+        ):
+            start_scan(pick_engines, pick_docs, clean=clean, redo=redo)
+            st.success("สั่งรันแล้ว ดูความคืบหน้าที่แถบด้านบน")
+            st.rerun()
 
 
 def drop_watermarks(results: dict) -> dict:
@@ -589,6 +684,11 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         st.warning("ยังไม่มีหน้าไหนมีเฉลย ไปทำที่แท็บ 'ทำเฉลย' ก่อน")
         return
 
+    # เฉลยสร้างอัตโนมัติจาก text layer ไฟล์สแกนจึงไม่มี แล้วหายไปจากช่องเลือกเงียบ ๆ
+    hidden = len(pages) - len(have_truth)
+    if hidden:
+        st.caption(f"ซ่อน {hidden} หน้าที่ยังไม่มีเฉลย — ดูรายชื่อได้ที่แถบข้าง")
+
     labels = {page_label(p): p for p in have_truth}
     top = st.columns([3, 2, 1])
     picked = labels[top[0].selectbox("หน้า", list(labels), label_visibility="collapsed")]
@@ -850,7 +950,17 @@ def main() -> None:
             )
             c4.metric("เลขไทยในเฉลย", f"{digits_in_truth:,}")
         if not results:
-            st.warning("ยังไม่มีผล OCR — รัน `run_bench.py`")
+            st.warning("ยังไม่มีผล OCR — กดสแกนด้านล่าง")
+
+        missing = sorted({p.doc_name for p in pages if p.page_id not in truth})
+        if missing:
+            st.info(
+                "เอกสารที่ยังไม่มีเฉลย จึงไม่โผล่ในแท็บเปรียบเทียบ:\n\n- "
+                + "\n- ".join(missing)
+                + "\n\nไปสร้างที่แท็บ 'ทำเฉลย'"
+            )
+
+        scan_panel(pages)
 
     progress_banner(len(pages))
 
