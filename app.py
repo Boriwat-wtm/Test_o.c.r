@@ -19,8 +19,14 @@ from pathlib import Path
 import streamlit as st
 
 from thai_ocr_bench import history, progress, store
-from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR
+from thai_ocr_bench.config import (
+    CLEAN_IMAGE_DIR,
+    IMAGE_DIR,
+    RESULTS_DIR,
+    SOURCE_DIR,
+)
 from thai_ocr_bench.engines.base import get_engines
+from thai_ocr_bench.preprocess import clean_file
 from thai_ocr_bench.metrics import (
     Span,
     align_lines,
@@ -28,7 +34,7 @@ from thai_ocr_bench.metrics import (
     page_cer,
     thai_digit_report,
 )
-from thai_ocr_bench.render import PageInfo, load_pages
+from thai_ocr_bench.render import PageInfo, load_pages, render_all
 from thai_ocr_bench.suspect import (
     independent_peers,
     scan_page,
@@ -396,6 +402,31 @@ def scan_panel(pages: list[PageInfo], results: dict) -> None:
     names = sorted(ready)
     docs = sorted({p.doc_name for p in pages})
     count = Counter(p.doc_name for p in pages)
+
+    # ไฟล์ที่เพิ่งวางในโฟลเดอร์ต้นทางยังไม่มีภาพ และหน้าเว็บ cache รายการหน้าไว้
+    # จึงไม่โผล่จนกว่าจะ render แล้วล้าง cache ซึ่งเดิมต้องออกไปพิมพ์เองใน terminal
+    new_pdfs = sorted(
+        p.stem for p in SOURCE_DIR.glob("*.pdf")
+        if p.stem not in {pg.doc_name for pg in pages}
+    ) if SOURCE_DIR.exists() else []
+    if new_pdfs:
+        st.warning(
+            f"มี {len(new_pdfs)} ไฟล์ในโฟลเดอร์ต้นทางที่ยังไม่ได้แปลงเป็นภาพ:\n\n- "
+            + "\n- ".join(short_doc(n, 30) for n in new_pdfs)
+        )
+    if st.button(
+        "อ่านไฟล์ใหม่จากโฟลเดอร์ต้นทาง",
+        use_container_width=True,
+        type="primary" if new_pdfs else "secondary",
+    ):
+        with st.spinner("กำลังแปลง PDF เป็นภาพ…"):
+            render_all()
+            for page in load_pages():
+                src = IMAGE_DIR / f"{page.page_id}.png"
+                if src.exists():
+                    clean_file(src, CLEAN_IMAGE_DIR / f"{page.page_id}.png")
+        st.cache_data.clear()  # ไม่งั้นรายการหน้ายังเป็นชุดเดิมที่จำไว้
+        st.rerun()
 
     st.subheader("สั่งสแกน", divider="gray")
     pick_docs = st.multiselect(
