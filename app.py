@@ -250,6 +250,12 @@ def start_scan(engines: list[str], docs: list[str], *, clean: bool, redo: bool) 
     และ Streamlit รันสคริปต์ใหม่ทุกครั้งที่ผู้ใช้กดอะไร งานจะโดนตัดกลางคัน
     ทั้งสองฝั่งคุยกันผ่าน results/run_status.json อยู่แล้ว จึงใช้ช่องทางเดิม
     """
+    # อ่านสถานะสด ๆ อีกครั้งตรงนี้ ค่าที่ปุ่มใช้ตัดสินใจมาจากตอนโหลดหน้า
+    # ซึ่งอาจเก่าไปหลายวินาทีแล้ว สองโปรเซสเขียน results/ ทับกันจะได้ผลปนกัน
+    if run_is_active(progress.load()):
+        st.warning("มีตัวรันทำงานอยู่แล้ว ไม่สั่งซ้ำ")
+        return
+
     cmd = [sys.executable, str(Path(__file__).parent / "run_bench.py")]
     for name in engines:
         cmd += ["-e", name]
@@ -268,6 +274,44 @@ def start_scan(engines: list[str], docs: list[str], *, clean: bool, redo: bool) 
     subprocess.Popen(
         cmd, stdout=handle, stderr=subprocess.STDOUT, cwd=log.parent.parent,
         creationflags=flags,
+    )
+
+
+@st.fragment(run_every="2s")
+def scan_status() -> None:
+    """สถานะการสแกนแบบย่อ วางไว้ใต้ปุ่มในแถบข้าง รีเฟรชตัวเองทุก 2 วินาที
+
+    แถบใหญ่กลางหน้ามีข้อมูลครบกว่าอยู่แล้ว แต่ผู้ใช้กดปุ่มที่แถบซ้าย
+    แล้วมองหาผลตรงนั้น ไม่ได้เงยไปดูกลางหน้า จึงต้องมีตัวย่อไว้ตรงจุดที่กด
+    ต้องเป็น fragment ไม่งั้นค้างอยู่ที่สถานะตอนโหลดหน้าครั้งล่าสุด
+    """
+    status = progress.load()
+    if status is None:
+        return
+
+    if status.finished:
+        note = f" · {status.failures} หน้าพัง" if status.failures else ""
+        st.success(
+            f"เสร็จแล้ว 100% — {len(status.done_engines)} engine × "
+            f"{status.pages_total} หน้า{note}"
+        )
+        # ผลใหม่จะยังไม่โผล่จนกว่าหน้าจะโหลดใหม่ เพราะ store.load() ถูกเรียก
+        # ตอนต้น main() ไปแล้ว ให้ปุ่มไว้แทนการ rerun เองเพื่อไม่ให้จอกระตุก
+        if st.button("โหลดผลใหม่", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+        return
+
+    if status.stale:
+        st.warning(f"ตัวรันหยุดไปแล้ว — ทำได้ {len(status.done_engines)} engine")
+        return
+
+    pct = status.overall_fraction
+    st.progress(pct, text=f"{pct:.0%} · {status.current_engine or 'กำลังเริ่ม'}")
+    st.caption(
+        f"engine {len(status.done_engines) + 1}/{len(status.engines)} · "
+        f"หน้า {status.pages_done}/{status.pages_total} · "
+        f"เหลือ ~{fmt_eta(status.eta_seconds())}"
     )
 
 
@@ -332,8 +376,9 @@ def scan_panel(pages: list[PageInfo]) -> None:
         st.caption(f"{total:,} ครั้ง · {len(use_docs)} เอกสาร × {len(use_engines)} engine")
         if st.button("เริ่มสแกน", type="primary", use_container_width=True):
             start_scan(use_engines, use_docs, clean=clean, redo=redo)
-            st.success("สั่งรันแล้ว ดูความคืบหน้าที่แถบด้านบน")
             st.rerun()
+
+    scan_status()
 
     # ข้อมูลอ้างอิง ไม่ใช่ตัวควบคุม จึงอยู่ล่างสุดและพับไว้
     if blocked:
