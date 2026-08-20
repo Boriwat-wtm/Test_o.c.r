@@ -362,6 +362,8 @@ function engineCard(e) {
 }
 
 function truthCard() {
+  // หน้าที่ยังไม่มีเฉลย ไม่ต้องขึ้นการ์ดเปล่า มันดูเหมือนเฉลยว่างเปล่า
+  if (!DATA.truth.length) return '';
   return `<div class="card truth"><div class="lab">เฉลย</div>` +
     DATA.truth.map(t => `<div class="line">${t}</div>`).join('') + `</div>`;
 }

@@ -296,9 +296,6 @@ def scan_panel(pages: list[PageInfo]) -> None:
             with st.expander(f"ยังใช้ไม่ได้ {len(blocked)} ตัว"):
                 for name, why in sorted(blocked.items()):
                     st.caption(f"`{name}` — {why}")
-        if not ready:
-            st.warning("ยังไม่มี engine ที่พร้อมใช้ — `uv sync --extra all`")
-            return
         names = sorted(ready)
 
         docs = sorted({p.doc_name for p in pages})
@@ -316,8 +313,13 @@ def scan_panel(pages: list[PageInfo]) -> None:
         total = sum(count[d] for d in pick_docs) * len(pick_engines)
         st.caption(f"จะอ่าน {total:,} ครั้ง (หน้า × engine)")
 
+        # ปุ่มต้องโผล่เสมอแม้กดไม่ได้ ถ้า return ทิ้งตอนไม่มี engine
+        # ผู้ใช้จะหาปุ่มไม่เจอแล้วนึกว่าฟีเจอร์ไม่มีอยู่จริง
         if active:
             st.button("กำลังสแกนอยู่…", disabled=True, use_container_width=True)
+        elif not names:
+            st.button("เริ่มสแกน", disabled=True, use_container_width=True)
+            st.caption("ยังไม่มี engine ที่พร้อมใช้ — `uv sync --extra all`")
         elif st.button(
             "เริ่มสแกน", type="primary", use_container_width=True,
             disabled=not (pick_docs and pick_engines),
@@ -679,17 +681,14 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     อยู่ใน viewer.py เพราะ Streamlit ทำสี่อย่างนั้นตรง ๆ ไม่ได้
     """
     truth = load_truth()
-    have_truth = [p for p in pages if p.page_id in truth]
-    if not have_truth:
-        st.warning("ยังไม่มีหน้าไหนมีเฉลย ไปทำที่แท็บ 'ทำเฉลย' ก่อน")
-        return
 
-    # เฉลยสร้างอัตโนมัติจาก text layer ไฟล์สแกนจึงไม่มี แล้วหายไปจากช่องเลือกเงียบ ๆ
-    hidden = len(pages) - len(have_truth)
-    if hidden:
-        st.caption(f"ซ่อน {hidden} หน้าที่ยังไม่มีเฉลย — ดูรายชื่อได้ที่แถบข้าง")
-
-    labels = {page_label(p): p for p in have_truth}
+    # เลือกได้ทุกหน้า ไม่ใช่เฉพาะหน้าที่มีเฉลย เฉลยสร้างอัตโนมัติจาก text layer
+    # ไฟล์สแกนจึงไม่มี แล้วเคยหายไปจากช่องเลือกเงียบ ๆ ทั้งที่ยังดูผลเทียบกับภาพได้
+    # หน้าที่ไม่มีเฉลยจะแสดงข้อความที่อ่านได้โดยไม่มีคะแนน
+    labels = {
+        page_label(p) + ("" if p.page_id in truth else "  ·  ยังไม่มีเฉลย"): p
+        for p in pages
+    }
     top = st.columns([3, 2, 1])
     picked = labels[top[0].selectbox("หน้า", list(labels), label_visibility="collapsed")]
     chosen = top[1].multiselect(
@@ -709,7 +708,13 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         st.error(f"ไม่พบไฟล์ภาพ {image_path.name}")
         return
 
-    truth_lines = truth[picked.page_id].lines
+    entry = truth.get(picked.page_id)
+    truth_lines = entry.lines if entry else []
+    if not truth_lines:
+        st.info(
+            "หน้านี้ยังไม่มีเฉลย จึงไม่มีคะแนน — เทียบข้อความกับภาพด้วยตาได้ "
+            "หรือไปสร้างเฉลยที่แท็บ 'ทำเฉลย'"
+        )
     engines = [
         _engine_record(name, results.get(name, {}).get(picked.page_id), truth_lines)
         for name in chosen
@@ -738,10 +743,55 @@ def _cached_image(path: str) -> tuple[str, int, int]:
     return encode_image(Path(path))
 
 
+def _unscored_record(name: str, stored) -> EngineRecord:
+    """ผลของ engine บนหน้าที่ยังไม่มีเฉลย — ข้อความล้วน ไม่มีคะแนน
+
+    ห้ามเรียก align_lines ด้วยเฉลยว่าง เพราะทุกบรรทัดจะกลายเป็น "เกินมา"
+    แล้วป้ายจะขึ้น "อ่านครบ 0/0" กับ "เกิน N บรรทัด" ซึ่งอ่านแล้วเข้าใจผิด
+    ว่า engine พัง ทั้งที่เราแค่ยังไม่มีอะไรให้เทียบ
+    """
+    badges = [
+        {"label": f"{len(stored.lines)} บรรทัด", "tone": "good"},
+        {"label": f"{stored.core_ms / 1000:.1f}s", "tone": "good"},
+    ]
+    notes = [{"kind": "info", "text": "ยังไม่มีเฉลยหน้านี้ — แสดงข้อความที่อ่านได้ ไม่มีคะแนน"}]
+
+    loop = repeated_line(stored.lines)
+    if loop:
+        text, count = loop
+        notes.append(
+            {
+                "kind": "error",
+                "text": f"engine นี้ติดลูป — พ่นบรรทัดเดิมซ้ำ {count} ครั้ง",
+            }
+        )
+
+    lines = [
+        LineRecord(
+            kind="matched",
+            html=html.escape(line),
+            box=stored.boxes[i] if i < len(stored.boxes) else None,
+            conf=stored.confidences[i] if i < len(stored.confidences) else None,
+        )
+        for i, line in enumerate(stored.lines)
+    ]
+    return EngineRecord(
+        name=name,
+        badges=badges,
+        notes=notes,
+        lines=lines,
+        has_boxes=any(b for b in stored.boxes),
+    )
+
+
 def _engine_record(
     name: str, stored, truth_lines: list[str]
 ) -> EngineRecord | None:
-    """แปลงผลดิบของ engine หนึ่งตัวเป็นข้อมูลที่ component ใช้ได้"""
+    """แปลงผลดิบของ engine หนึ่งตัวเป็นข้อมูลที่ component ใช้ได้
+
+    truth_lines ว่างได้ หน้าที่ยังไม่มีเฉลยจะแสดงข้อความที่อ่านได้เฉย ๆ
+    โดยไม่มีคะแนน ดีกว่าซ่อนทั้งหน้าเพราะยังเอาไปเทียบกับภาพด้วยตาได้
+    """
     if stored is None:
         return EngineRecord(
             name=name,
@@ -752,6 +802,9 @@ def _engine_record(
             name=name,
             notes=[{"kind": "error", "text": f"พัง: {html.escape(str(stored.error))}"}],
         )
+
+    if not truth_lines:
+        return _unscored_record(name, stored)
 
     score = align_lines(truth_lines, stored.lines)
     digits = thai_digit_report("\n".join(truth_lines), "\n".join(stored.lines))
