@@ -801,17 +801,35 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     # เลือกได้ทุกหน้า ไม่ใช่เฉพาะหน้าที่มีเฉลย เฉลยสร้างอัตโนมัติจาก text layer
     # ไฟล์สแกนจึงไม่มี แล้วเคยหายไปจากช่องเลือกเงียบ ๆ ทั้งที่ยังดูผลเทียบกับภาพได้
     # หน้าที่ไม่มีเฉลยจะแสดงข้อความที่อ่านได้โดยไม่มีคะแนน
-    labels = {
-        page_label(p) + ("" if p.page_id in truth else "  ·  ยังไม่มีเฉลย"): p
-        for p in pages
+    #
+    # แยกเอกสารกับหน้าเป็นคนละช่อง เฉพาะแท็บนี้ เพราะเป็นแท็บที่ต้องสลับหน้าถี่สุด
+    # รวมเป็นช่องเดียวแล้วทุกบรรทัดขึ้นต้นด้วยชื่อเอกสารซ้ำกัน ต่างแค่เลขหน้าท้ายสุด
+    docs = sorted({p.doc_name for p in pages})
+    per_doc = Counter(p.doc_name for p in pages)
+
+    top = st.columns([3, 1.3, 2.4, 1])
+    doc = top[0].selectbox(
+        "เอกสาร",
+        docs,
+        format_func=lambda d: f"{d}  ({per_doc[d]} หน้า)",
+        label_visibility="collapsed",
+        key="cmp_doc",
+    )
+    subset = [p for p in pages if p.doc_name == doc]
+    page_labels = {
+        f"หน้า {p.page_no}" + ("" if p.page_id in truth else "  ·  ยังไม่มีเฉลย"): p
+        for p in subset
     }
-    top = st.columns([3, 2, 1])
-    picked = labels[top[0].selectbox("หน้า", list(labels), label_visibility="collapsed")]
+    picked = page_labels[
+        top[1].selectbox(
+            "หน้า", list(page_labels), label_visibility="collapsed", key="cmp_page"
+        )
+    ]
     # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
     # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
     all_engines = sorted(results)
     chosen = (
-        top[1].multiselect(
+        top[2].multiselect(
             "engine",
             all_engines,
             label_visibility="collapsed",
@@ -819,7 +837,7 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         )
         or all_engines
     )
-    tall = top[2].selectbox(
+    tall = top[3].selectbox(
         "ความสูง", ["ปกติ", "สูง", "เต็มจอ"], label_visibility="collapsed"
     )
     height = {"ปกติ": 760, "สูง": 900, "เต็มจอ": 1100}[tall]
