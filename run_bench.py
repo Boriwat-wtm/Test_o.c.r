@@ -157,6 +157,18 @@ def _run_engines(ready, pages, results, status, record, args, image_dir, suffix)
             results.setdefault(key, {})[page.page_id] = store.from_result(result)
             store.save(results, {"versions": snapshot()})
 
+            # เก็บผลรายหน้าไว้ด้วย store.save() ทับผลเดิมของหน้านี้ทิ้ง
+            # จึงเทียบไม่ได้ว่ารอบนี้อ่านได้ต่างจากรอบก่อนตรงไหน
+            history.append_page(
+                record["started_at"],
+                key,
+                page.page_id,
+                ok=result.ok,
+                ms=result.core_ms or 0,
+                lines=[ln.text for ln in result.lines] if result.ok else [],
+                error=str(result.error) if not result.ok else None,
+            )
+
             if not result.ok:
                 failures += 1
                 print(f"  {i}/{len(pending)} {page.page_id} พัง: {result.error}")

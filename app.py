@@ -810,6 +810,60 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         scrolling=False,
     )
 
+    page_round_history(picked.page_id)
+
+
+def page_round_history(page_id: str) -> None:
+    """ประวัติการอ่านหน้านี้ทีละรอบ
+
+    วางไว้ใต้ split view ไม่ยัดเข้าไปในนั้น เพราะ component ข้างบนออกแบบมา
+    สำหรับเทียบผลล่าสุดกับภาพ ส่วนตรงนี้คือเทียบรอบต่อรอบ คนละคำถามกัน
+    """
+    rows = history.load_page(page_id)
+    if not rows:
+        with st.expander("ประวัติการอ่านหน้านี้"):
+            st.caption(
+                "ยังไม่มีประวัติของหน้านี้ — เริ่มบันทึกตั้งแต่รอบถัดไปที่กดสแกน "
+                "ผลที่เห็นข้างบนมาจาก `ocr_results.json` ซึ่งเก็บแค่ผลล่าสุด"
+            )
+        return
+
+    order = history.run_order()
+    by_run: dict[str, list[dict]] = {}
+    for r in rows:
+        by_run.setdefault(r["run"], []).append(r)
+
+    with st.expander(f"ประวัติการอ่านหน้านี้ — {len(by_run)} รอบ", expanded=False):
+        labels = {}
+        for run in by_run:  # rows เรียงล่าสุดก่อนอยู่แล้ว dict จึงคงลำดับนั้น
+            stamp = run.replace("T", " ").replace("+00:00", "")
+            no = order.get(run)
+            head = f"รอบที่ {no}" if no else "รอบที่ ?"
+            labels[f"{head} · {stamp} · {len(by_run[run])} engine"] = run
+
+        pick = st.radio(
+            "เลือกรอบ", list(labels), horizontal=False, label_visibility="collapsed"
+        )
+        chosen_rows = by_run[labels[pick]]
+
+        st.dataframe(
+            [
+                {
+                    "engine": r["engine"],
+                    "บรรทัด": len(r["lines"]),
+                    "วินาที": f"{r['ms'] / 1000:.1f}",
+                    "สถานะ": "เสร็จ" if r["ok"] else f"พัง: {r.get('error')}",
+                }
+                for r in chosen_rows
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        for r in chosen_rows:
+            with st.expander(f"{r['engine']} — {len(r['lines'])} บรรทัด"):
+                st.code("\n".join(r["lines"]) or "(ไม่มีข้อความ)")
+
 
 @st.cache_data(show_spinner=False, max_entries=24)
 def _cached_image(path: str) -> tuple[str, int, int]:
