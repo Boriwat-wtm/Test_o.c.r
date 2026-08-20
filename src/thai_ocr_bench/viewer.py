@@ -137,9 +137,11 @@ _TEMPLATE = r"""
                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .seg { display:inline-flex; background:var(--surface); border:1px solid var(--border);
          border-radius:8px; overflow:hidden; }
-  .seg button { border:0; background:transparent; padding:.34rem .8rem; font-size:12.5px;
+  /* ห้ามตัดคำ ภาษาไทยไม่มีช่องว่างระหว่างคำ เบราว์เซอร์จึงตัดกลางคำได้
+     เป็น "ภาพ/ดิบ" ซึ่งอ่านยากและทำให้ปุ่มในชุดเดียวกันสูงไม่เท่ากัน */
+  .seg button { border:0; background:transparent; padding:.34rem .7rem; font-size:12.5px;
                 font-weight:600; cursor:pointer; color:var(--ink-soft);
-                font-family:inherit; }
+                font-family:inherit; white-space:nowrap; }
   .seg button.on { background:var(--accent); color:#fff; }
   .btn { border:1px solid var(--border); background:var(--surface); border-radius:8px;
          padding:.34rem .6rem; font-size:12.5px; cursor:pointer; color:var(--ink);
@@ -169,8 +171,12 @@ _TEMPLATE = r"""
   .bx.on { display:block; }
 
   /* ── ฝั่งผลลัพธ์ ── */
-  .tabs { display:flex; gap:.25rem; padding:.45rem .6rem 0; border-bottom:1px solid var(--border);
-          overflow-x:auto; flex:none; background:var(--surface); }
+  .tabsrow { display:flex; align-items:center; gap:.5rem; flex:none;
+             border-bottom:1px solid var(--border); background:var(--surface);
+             padding:0 .6rem 0 0; }
+  .tabsrow .seg { flex:none; margin:.35rem 0; }
+  .tabs { display:flex; gap:.25rem; padding:.45rem .6rem 0;
+          overflow-x:auto; flex:1; min-width:0; background:var(--surface); }
   .tabs button { border:0; border-bottom:2px solid transparent; background:transparent;
                  padding:.4rem .7rem .5rem; font-size:12.5px; font-weight:600; cursor:pointer;
                  color:var(--ink-soft); white-space:nowrap; font-family:var(--mono); }
@@ -256,11 +262,6 @@ _TEMPLATE = r"""
       <button data-mode="single" class="on">ดูทีละตัว</button>
       <button data-mode="compare">เทียบพร้อมกัน</button>
     </div>
-    <div class="seg" id="varseg">
-      <button data-var="both" class="on">ทั้งสอง</button>
-      <button data-var="ภาพดิบ">ภาพดิบ</button>
-      <button data-var="ลบลายน้ำแล้ว">ลบลายน้ำ</button>
-    </div>
     <button class="btn" id="copybtn">คัดลอกข้อความ</button>
   </div>
 
@@ -283,7 +284,16 @@ _TEMPLATE = r"""
     </div>
 
     <div class="pane-r">
-      <div class="tabs" id="tabs"></div>
+      <!-- ตัวเลือกภาพต้นทางอยู่ในแถวเดียวกับแท็บของฝั่งผลลัพธ์ ไม่ใช่แถบบนสุด
+           เพราะมันคุมการ์ดในฝั่งนี้ วางไกลจากของที่มันคุมแล้วหาไม่เจอ -->
+      <div class="tabsrow">
+        <div class="tabs" id="tabs"></div>
+        <div class="seg" id="varseg">
+          <button data-var="both" class="on">ทั้งสอง</button>
+          <button data-var="ภาพดิบ">ภาพดิบ</button>
+          <button data-var="ลบลายน้ำแล้ว">ลบลายน้ำ</button>
+        </div>
+      </div>
       <div class="scroll" id="scroll"></div>
     </div>
   </div>
