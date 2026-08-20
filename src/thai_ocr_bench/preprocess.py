@@ -56,9 +56,39 @@ def detect_light_layer(image: Image.Image) -> float:
     return float(((gray >= DEFAULT_THRESHOLD) & (gray < 245)).mean())
 
 
-def has_watermark(image: Image.Image, min_ratio: float = 0.005) -> bool:
-    """มีลายน้ำให้ลบไหม — ถ้าไม่มีก็ไม่ควรแตะภาพเลย"""
-    return detect_light_layer(image) >= min_ratio
+def separation(image: Image.Image) -> float:
+    """ก้อนเทาจางแยกตัวออกมาชัดแค่ไหน = ขนาดก้อน (230-244) หารด้วยความลึกหลุม (200-229)
+
+    ตัวนี้มีไว้แยกลายน้ำออกจากภาพสแกนพื้นเทา ซึ่ง detect_light_layer แยกไม่ออก
+    เพราะมันนับแค่ว่าช่วง 215-244 มีพิกเซลเยอะไหม แต่สแกนก็มีเยอะเหมือนกัน
+    จากขอบตัวอักษรที่ถูก anti-alias ทำให้สแกนธรรมดาถูกตัดสินว่ามีลายน้ำ
+
+    ความต่างอยู่ที่รูปทรงของฮิสโทแกรม วัดจากหน้าจริงในชุดทดสอบ
+        กฏหมาย (ลายน้ำจริง)  200-229 = 0.27%  230-244 = 1.77%  ratio 6.6
+        นโยบาย (สแกน)        200-229 = 1.46%  230-244 = 2.11%  ratio 1.4
+        คำสั่ง  (สแกน)        200-229 = 1.20%  230-244 = 3.28%  ratio 2.7
+    ลายน้ำเป็นเฉดเดียวจึงกองอยู่ที่เดียวโดยมีหลุมว่างคั่นก่อนถึงตัวหนังสือ
+    ส่วนสแกนไล่เฉดต่อเนื่องจากดำไปขาว ไม่มีหลุม
+    """
+    gray = np.asarray(image.convert("L"))
+    valley = float(((gray >= 200) & (gray < 230)).mean())
+    bump = float(((gray >= 230) & (gray < 245)).mean())
+    if valley <= 0:
+        return float("inf") if bump > 0 else 0.0
+    return bump / valley
+
+
+def has_watermark(
+    image: Image.Image, min_ratio: float = 0.005, min_separation: float = 4.0
+) -> bool:
+    """มีลายน้ำให้ลบไหม — ถ้าไม่มีก็ไม่ควรแตะภาพเลย
+
+    ต้องผ่านทั้งสองข้อ มีก้อนเทาจางมากพอ และก้อนนั้นแยกตัวจริงไม่ใช่แค่
+    ขอบตัวอักษรของภาพสแกน จุดตัด 4.0 อยู่กลางช่องว่างระหว่างสองกลุ่มที่วัดได้
+    """
+    return (
+        detect_light_layer(image) >= min_ratio and separation(image) >= min_separation
+    )
 
 
 def ink_ratio(image: Image.Image, threshold: int = DEFAULT_THRESHOLD) -> float:
