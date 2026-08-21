@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import html
+import json
 import subprocess
 import sys
 from collections import Counter
@@ -1369,6 +1370,72 @@ def view_history() -> None:
             st.code(text[-8000:] or "(ว่าง)")
 
 
+# ── หน้าอ่านซ้ำแบบซูม ────────────────────────────────────────────────────
+def view_rescue(pages: list[PageInfo]) -> None:
+    st.subheader("จุดที่อ่านซ้ำแบบซูม")
+    st.caption(
+        "จุดที่ตัวคัดสงสัยว่าอ่านผิด ถูกครอปออกมาขยาย 4 เท่าแล้วส่งให้อ่านใหม่ "
+        "ผลอยู่ที่นี่เพื่อให้ตัดสินทีละจุด ไม่ได้เขียนทับผลเดิมอัตโนมัติ"
+    )
+
+    path = RESULTS_DIR / "rescue.json"
+    if not path.exists():
+        st.info(
+            "ยังไม่มีผลอ่านซ้ำ — รัน `uv run python rescue.py --engine <ชื่อ engine>` "
+            "หลังจากมีผล OCR แล้ว"
+        )
+        return
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    items = data.get("items", [])
+    engine = data.get("engine", "?")
+    if not items:
+        st.info("ไฟล์มีอยู่แต่ไม่มีจุดไหนถูกอ่านซ้ำ")
+        return
+
+    changed = [r for r in items if r.get("changed")]
+    failed = [r for r in items if r.get("error")]
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("จุดที่อ่านซ้ำ", len(items))
+    c2.metric("ข้อความเปลี่ยน", len(changed))
+    c3.metric("อ่านไม่สำเร็จ", len(failed))
+    st.caption(f"engine ที่ใช้อ่านซ้ำ: `{engine}`")
+
+    only_changed = st.checkbox("แสดงเฉพาะจุดที่ข้อความเปลี่ยน", value=True)
+    shown = changed if only_changed else items
+    if not shown:
+        st.success("อ่านซ้ำแล้วไม่มีจุดไหนเปลี่ยน — ผลเดิมน่าจะถูกอยู่แล้ว")
+        return
+
+    byid = {p.page_id: p for p in pages}
+    for i, r in enumerate(shown):
+        page = byid.get(r["page_id"])
+        label = page_label(page) if page else r["page_id"]
+        head = f"{label} · บรรทัดที่ {r['grid_line'] + 1}"
+        with st.expander(head, expanded=(i == 0)):
+            # ครอปด้วยกรอบเดียวกับที่ rescue ใช้ จะได้เห็นสิ่งที่ engine เห็นตอนอ่านซ้ำ
+            img = _crop(str(IMAGE_DIR / f"{r['page_id']}.png"), tuple(r["box"]), pad=24)
+            if img:
+                st.markdown(
+                    f'<img src="{img}" style="width:100%;border:1px solid #E4E6EC;'
+                    f'border-radius:8px" alt="ภาพบรรทัดที่อ่านซ้ำ">',
+                    unsafe_allow_html=True,
+                )
+            a, b = st.columns(2)
+            a.markdown("**เดิม** (อ่านรวมทั้งหน้า)")
+            a.code(r["before"] or "(ว่าง)")
+            b.markdown("**อ่านซ้ำ** (ครอป · ขยาย 4 เท่า)")
+            b.code(r["after"] or "(ว่าง)")
+            if r.get("error"):
+                st.error(f"อ่านซ้ำไม่สำเร็จ: {r['error']}")
+
+    st.caption(
+        "ยังไม่มีปุ่มรับผลอ่านซ้ำเข้าไปแทนที่ของเดิม เพราะข้อความเดิมเป็นส่วนที่หั่นตามกริด "
+        "ซึ่งบางครั้งกินยาวกว่าบรรทัดจริงในภาพ แทนที่ตรง ๆ แล้ววัดได้ว่าทำข้อความหาย"
+    )
+
+
 # ── ประกอบหน้า ───────────────────────────────────────────────────────────
 def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
@@ -1416,6 +1483,7 @@ def main() -> None:
             "📊 สรุปผล",
             "✏️ ทำเฉลย",
             "🖼️ ตรวจภาพ",
+            "🔎 อ่านซ้ำแบบซูม",
             "🧾 ประวัติการรัน",
         ]
     )
@@ -1430,6 +1498,8 @@ def main() -> None:
     with tabs[4]:
         view_images(pages)
     with tabs[5]:
+        view_rescue(pages)
+    with tabs[6]:
         view_history()
 
 
