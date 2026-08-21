@@ -25,8 +25,10 @@ paddle = ["paddleocr>=3.7.0", "paddlepaddle>=3.3.1"]
 # หมายเหตุ: แพ็กเกจชื่อ rapidocr-onnxruntime เลิกพัฒนาแล้ว (ค้างที่ 1.4.4)
 rapid = ["rapidocr>=3.9.2", "onnxruntime>=1.20"]
 typhoon = ["typhoon-ocr>=0.4.1"]
-# ThaiTrOCR โหลดโมเดลผ่าน transformers และต้องมี torch
-trocr = ["transformers>=5.0", "torch>=2.8"]
+# ThaiTrOCR กับ typhoon-2b โหลดโมเดลผ่าน transformers และต้องมี torch
+# accelerate จำเป็นเพราะโค้ดใช้ device_map="cuda:0" ซึ่ง transformers บังคับให้มี
+# ถ้าขาด engine จะรายงานว่าพร้อมใช้แล้วไปพังตอนโหลดโมเดลทุกหน้า
+trocr = ["transformers>=5.0", "torch>=2.8", "accelerate>=1.0"]
 
 # ทุก engine ที่ใช้จริง — มีไว้ให้ `uv sync --extra all` คืนสภาพแวดล้อมได้ครบ
 # ถ้าไม่ประกาศไว้ตรงนี้ `uv sync` เปล่า ๆ จะถอน engine ทิ้งทั้งหมด
@@ -38,6 +40,7 @@ all = [
     "typhoon-ocr>=0.4.1",
     "transformers>=5.0",
     "torch>=2.8",
+    "accelerate>=1.0",
 ]
 
 # เครื่องมือตอนพัฒนา — uv sync ติดตั้งกลุ่มนี้ให้เองโดยไม่ต้องระบุ extra

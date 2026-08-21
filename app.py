@@ -852,24 +852,35 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         f"หน้า {p.page_no}" + ("" if p.page_id in truth else "  ·  ยังไม่มีเฉลย"): p
         for p in subset
     }
-    picked = page_labels[
-        top[1].selectbox(
-            "หน้า", list(page_labels), label_visibility="collapsed", key="cmp_page"
-        )
-    ]
+    # ตำแหน่งหน้าเก็บเป็นดัชนีในคีย์ของเราเอง ไม่ใช่คีย์ของ widget
+    # จะได้ให้ปุ่มเลื่อนหน้าแก้ค่าได้ ดูเหตุผลที่ปุ่มด้านล่าง
+    want = min(st.session_state.get(NAV_KEY, 0), len(page_labels) - 1)
+    picked_label = top[1].selectbox(
+        "หน้า",
+        list(page_labels),
+        index=max(0, want),
+        label_visibility="collapsed",
+        key="cmp_page",
+    )
+    picked = page_labels[picked_label]
+    # ถ้าผู้ใช้เลือกเองจาก dropdown ต้องให้ตำแหน่งที่จำไว้ตามไปด้วย
+    st.session_state[NAV_KEY] = list(page_labels).index(picked_label)
 
-    # ปุ่มเลื่อนหน้า — งานหลักของแท็บนี้คือไล่ตรวจทีละหน้า การต้องเปิด dropdown
-    # ทุกครั้งช้ากว่ามาก ปุ่มตั้งค่า session_state ของ selectbox แล้ว rerun
-    # จึงไม่ต้องสนใจว่า widget ถูกสร้างไปแล้วในรอบนี้
+    # ปุ่มเลื่อนหน้า — งานหลักของแท็บนี้คือไล่ตรวจทีละหน้า เปิด dropdown ทุกครั้งช้ากว่ามาก
+    #
+    # ห้ามเขียนทับ st.session_state["cmp_page"] ซึ่งเป็นคีย์ของ selectbox
+    # Streamlit ห้ามแก้ค่าของคีย์ที่ widget ถูกสร้างไปแล้วในรอบเดียวกัน
+    # แม้จะเรียก st.rerun() ต่อทันทีก็ตาม (โยน StreamlitAPIException)
+    # จึงเก็บตำแหน่งไว้ในคีย์ของเราเอง แล้วส่งเข้า selectbox ทาง index แทน
     keys = list(page_labels)
-    here = keys.index(st.session_state.get("cmp_page", keys[0])) if keys else 0
+    here = keys.index(picked_label)
     if top[2].button("‹", disabled=here == 0, use_container_width=True,
                      help="หน้าก่อนหน้า"):
-        st.session_state["cmp_page"] = keys[here - 1]
+        st.session_state[NAV_KEY] = here - 1
         st.rerun()
     if top[3].button("›", disabled=here >= len(keys) - 1, use_container_width=True,
                      help="หน้าถัดไป"):
-        st.session_state["cmp_page"] = keys[here + 1]
+        st.session_state[NAV_KEY] = here + 1
         st.rerun()
     # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
     # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
@@ -906,7 +917,7 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     ]
     engines = [e for e in engines if e is not None]
 
-    image_uri, img_w, img_h = _cached_image(str(image_path))
+    image_uri, img_w, img_h = cached_image(image_path)
     st.components.v1.html(
         build_html(
             image_uri=image_uri,
@@ -1042,10 +1053,27 @@ def page_round_history(page_id: str) -> None:
                 st.code("\n".join(r["lines"]) or "(ไม่มีข้อความ)")
 
 
-@st.cache_data(show_spinner=False, max_entries=24)
-def _cached_image(path: str) -> tuple[str, int, int]:
-    """แปลงรูปเป็น data URI แล้วจำไว้ — ไม่งั้นทุกครั้งที่กดอะไรก็เข้ารหัสใหม่"""
+@st.cache_data(show_spinner=False, max_entries=24, persist="disk")
+def _cached_image(path: str, mtime: float) -> tuple[str, int, int]:
+    """แปลงรูปเป็น data URI แล้วจำไว้ — ไม่งั้นทุกครั้งที่กดอะไรก็เข้ารหัสใหม่
+
+    วัดแล้วขั้นนี้ใช้ 469 ms ต่อหน้า ซึ่งเป็น 90% ของเวลาที่รอตอนเปลี่ยนหน้า
+    (ย่อ 2480x3508 แล้วเข้ารหัส WebP) แคชเดิมอยู่ในหน่วยความจำอย่างเดียว
+    จึงหายทุกครั้งที่รีสตาร์ท และตอนไล่ตรวจทีละหน้าจะเสียเวลานี้ทุกหน้าใหม่
+
+    persist="disk" ทำให้หน้าที่เคยเปิดแล้วเร็วทันทีข้ามรอบการรัน
+    ส่ง mtime เข้ามาด้วยเพื่อให้แคชหมดอายุเองเมื่อ render ภาพใหม่
+    """
     return encode_image(Path(path))
+
+
+def cached_image(path: Path) -> tuple[str, int, int]:
+    stamp = path.stat().st_mtime if path.exists() else 0.0
+    return _cached_image(str(path), stamp)
+
+
+# ตำแหน่งหน้าที่กำลังดูในแท็บเปรียบเทียบ แยกจากคีย์ของ widget โดยตั้งใจ
+NAV_KEY = "cmp_page_index"
 
 
 CLEAN_SUFFIX = "+clean"

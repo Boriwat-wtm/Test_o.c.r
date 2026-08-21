@@ -55,6 +55,13 @@ class TyphoonOcr(Engine):
             return False, f"ยังไม่ได้ติดตั้ง transformers/torch ({exc})"
         if not torch.cuda.is_available():
             return False, "ต้องมี GPU (torch มองไม่เห็น CUDA)"
+        # ต้องเช็กถึงระดับที่ใช้จริง — _load() ส่ง device_map="cuda:0"
+        # ซึ่ง transformers บังคับให้มี accelerate ถ้าขาดจะรายงานว่าพร้อมใช้
+        # แล้วไปพังตอนโหลดโมเดลทุกหน้า (เจอมาแล้วตอนรันทั้งชุด)
+        from importlib.util import find_spec
+
+        if find_spec("accelerate") is None:
+            return False, "ยังไม่ได้ติดตั้ง accelerate (device_map ต้องใช้)"
         return True, ""
 
     def _load(self) -> tuple[Any, Any]:
