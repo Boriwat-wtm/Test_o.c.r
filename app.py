@@ -839,7 +839,7 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     docs = sorted({p.doc_name for p in pages})
     per_doc = Counter(p.doc_name for p in pages)
 
-    top = st.columns([3, 1.3, 2.4, 1])
+    top = st.columns([2.6, 1.25, 0.34, 0.34, 2.1, 0.95])
     doc = top[0].selectbox(
         "เอกสาร",
         docs,
@@ -857,11 +857,25 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
             "หน้า", list(page_labels), label_visibility="collapsed", key="cmp_page"
         )
     ]
+
+    # ปุ่มเลื่อนหน้า — งานหลักของแท็บนี้คือไล่ตรวจทีละหน้า การต้องเปิด dropdown
+    # ทุกครั้งช้ากว่ามาก ปุ่มตั้งค่า session_state ของ selectbox แล้ว rerun
+    # จึงไม่ต้องสนใจว่า widget ถูกสร้างไปแล้วในรอบนี้
+    keys = list(page_labels)
+    here = keys.index(st.session_state.get("cmp_page", keys[0])) if keys else 0
+    if top[2].button("‹", disabled=here == 0, use_container_width=True,
+                     help="หน้าก่อนหน้า"):
+        st.session_state["cmp_page"] = keys[here - 1]
+        st.rerun()
+    if top[3].button("›", disabled=here >= len(keys) - 1, use_container_width=True,
+                     help="หน้าถัดไป"):
+        st.session_state["cmp_page"] = keys[here + 1]
+        st.rerun()
     # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
     # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
     all_engines = sorted(results)
     chosen = (
-        top[2].multiselect(
+        top[4].multiselect(
             "engine",
             all_engines,
             label_visibility="collapsed",
@@ -869,7 +883,7 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         )
         or all_engines
     )
-    tall = top[3].selectbox(
+    tall = top[5].selectbox(
         "ความสูง", ["ปกติ", "สูง", "เต็มจอ"], label_visibility="collapsed"
     )
     height = {"ปกติ": 760, "สูง": 900, "เต็มจอ": 1100}[tall]
@@ -1371,19 +1385,58 @@ def view_history() -> None:
 
 
 # ── หน้าอ่านซ้ำแบบซูม ────────────────────────────────────────────────────
-def view_rescue(pages: list[PageInfo]) -> None:
+def start_rescue(engine: str, limit: int | None) -> None:
+    """สั่ง rescue.py เป็นคนละโปรเซส แบบเดียวกับปุ่มสแกน
+
+    ต้องแยกโปรเซสเพราะการอ่านซ้ำยิง API ทีละจุดโดยมี throttle 3.1 วินาที
+    ถ้ารันในโปรเซสของหน้าเว็บจะบล็อกจนหน้าหมุนค้างเป็นนาที
+    """
+    cmd = [sys.executable, str(Path(__file__).parent / "rescue.py"), "--engine", engine]
+    if limit:
+        cmd += ["--limit", str(limit)]
+
+    log = RESULTS_DIR / "rescue.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    handle = log.open("a", encoding="utf-8")
+    handle.write(f"\n{'=' * 70}\nเริ่มอ่านซ้ำ {history.now_iso()} · engine {engine}\n")
+    handle.flush()
+    subprocess.Popen(
+        cmd, stdout=handle, stderr=subprocess.STDOUT, cwd=log.parent.parent,
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    )
+
+
+def rescue_controls(results: dict) -> None:
+    """แผงสั่งอ่านซ้ำ — วางไว้บนสุดของแท็บ ไม่ต้องออกไปพิมพ์คำสั่งเอง"""
+    with st.container(border=True):
+        c1, c2, c3 = st.columns([3, 1.2, 1.4])
+        names = sorted(results)
+        if not names:
+            st.caption("ยังไม่มีผล OCR ให้อ่านซ้ำ — สแกนก่อน")
+            return
+        # ตัวที่แม่นสุดคุ้มสุดที่จะอ่านซ้ำ เพราะจุดที่มันยังผิดคือจุดที่ยากจริง
+        default = next((i for i, n in enumerate(names) if "num" in n), 0)
+        engine = c1.selectbox("engine ที่จะให้อ่านซ้ำ", names, index=default)
+        limit = c2.number_input("จำกัดจุด", min_value=0, max_value=999, value=0,
+                                help="0 = ไม่จำกัด ใส่เลขไว้ลองก่อนได้")
+        c3.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
+        if c3.button("เริ่มอ่านซ้ำ", type="primary", use_container_width=True):
+            start_rescue(engine, int(limit) or None)
+            st.success("สั่งแล้ว — กดโหลดใหม่อีกครั้งเมื่อรันเสร็จ")
+
+
+def view_rescue(pages: list[PageInfo], results: dict) -> None:
     st.subheader("จุดที่อ่านซ้ำแบบซูม")
     st.caption(
         "จุดที่ตัวคัดสงสัยว่าอ่านผิด ถูกครอปออกมาขยาย 4 เท่าแล้วส่งให้อ่านใหม่ "
         "ผลอยู่ที่นี่เพื่อให้ตัดสินทีละจุด ไม่ได้เขียนทับผลเดิมอัตโนมัติ"
     )
 
+    rescue_controls(results)
+
     path = RESULTS_DIR / "rescue.json"
     if not path.exists():
-        st.info(
-            "ยังไม่มีผลอ่านซ้ำ — รัน `uv run python rescue.py --engine <ชื่อ engine>` "
-            "หลังจากมีผล OCR แล้ว"
-        )
+        st.info("ยังไม่มีผลอ่านซ้ำ — เลือก engine ด้านบนแล้วกดเริ่มอ่านซ้ำ")
         return
 
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -1430,6 +1483,8 @@ def view_rescue(pages: list[PageInfo]) -> None:
             if r.get("error"):
                 st.error(f"อ่านซ้ำไม่สำเร็จ: {r['error']}")
 
+    if st.button("โหลดผลอ่านซ้ำใหม่"):
+        st.rerun()
     st.caption(
         "ยังไม่มีปุ่มรับผลอ่านซ้ำเข้าไปแทนที่ของเดิม เพราะข้อความเดิมเป็นส่วนที่หั่นตามกริด "
         "ซึ่งบางครั้งกินยาวกว่าบรรทัดจริงในภาพ แทนที่ตรง ๆ แล้ววัดได้ว่าทำข้อความหาย"
@@ -1498,7 +1553,7 @@ def main() -> None:
     with tabs[4]:
         view_images(pages)
     with tabs[5]:
-        view_rescue(pages)
+        view_rescue(pages, results)
     with tabs[6]:
         view_history()
 
