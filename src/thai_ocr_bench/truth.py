@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,6 +90,71 @@ def find_repeating_lines(pages: dict[str, list[str]], threshold: float = 0.8) ->
     return {line for line, n in counter.items() if n >= limit}
 
 
+# ตัวยกมีฟอนต์เล็กกว่าตัวปกติในบรรทัดเดียวกันอย่างชัดเจน
+# วัดจากเอกสารจริง: ตัวปกติ 15.96 ตัวยก 10.56 = 0.66 เท่า
+SUPERSCRIPT_SIZE_RATIO = 0.80
+# และ baseline ลอยสูงกว่า (ค่า y น้อยกว่า เพราะแกน y ของ PDF นับลงล่าง)
+SUPERSCRIPT_RISE_PT = 1.5
+
+
+def page_lines_without_superscripts(page) -> list[str]:
+    """ข้อความรายบรรทัดโดยตัดตัวยกออก
+
+    ทำไมต้องตัด — เลขเชิงอรรถในกฎหมายไทยเป็นตัวยกต่อท้ายเลขมาตรา
+    get_text("text") คืนมาเป็นข้อความไหลเดียวกัน "มาตรา ๑๔" + ตัวยก "๑๓"
+    จึงกลายเป็น "มาตรา ๑๔๑๓" ซึ่งไม่มีอยู่จริงในเอกสาร
+    เมื่อเอาไปเป็นเฉลย engine ที่อ่านถูกจะถูกนับว่าผิดทุกครั้งที่เจอเลขมาตรา
+    (พบกับประมวลกฎหมายที่ดิน 54 หน้า มีจุดแบบนี้หลายสิบจุด)
+
+    แยกออกได้แน่นอนเพราะ PDF เก็บตัวยกเป็น span ต่างหากที่ฟอนต์เล็กกว่า
+    และ baseline สูงกว่า จึงไม่ต้องเดาว่าเลขไหนเป็นเลขมาตราเลขไหนเป็นเชิงอรรถ
+    """
+    out: list[str] = []
+    for block in page.get_text("dict").get("blocks", []):
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            if not spans:
+                continue
+            # เทียบกับขนาดที่ใหญ่ที่สุดในบรรทัด ซึ่งคือขนาดของเนื้อความ
+            body = max(s["size"] for s in spans)
+            base = max(s["origin"][1] for s in spans)
+            kept = [
+                s["text"]
+                for s in spans
+                if not (
+                    s["size"] < body * SUPERSCRIPT_SIZE_RATIO
+                    and base - s["origin"][1] > SUPERSCRIPT_RISE_PT
+                )
+            ]
+            text = "".join(kept).strip()
+            if text:
+                out.append(text)
+    return out
+
+
+# อักขระ ASCII ที่แทรกอยู่กลางคำไทย = ฟอนต์ใน PDF แมปผิด
+# ข้อความไทยที่ถูกต้องไม่มีทางมี = < > * @ ^ ~ ` | หรือเลขอารบิก คั่นกลางสองพยัญชนะ
+_BROKEN_GLYPH = re.compile(r"[ก-๛][=<>*@^~`|0-9][ก-๛]")
+# วัดจากเอกสารจริง: ไฟล์ดี 0.00 ต่อพันตัวไทย ไฟล์ที่ฟอนต์เสีย 19.28
+BROKEN_PER_1000 = 2.0
+
+
+def broken_glyph_rate(text: str) -> float:
+    """จำนวนอักขระแปลกที่แทรกกลางคำไทย ต่อตัวอักษรไทยหนึ่งพันตัว
+
+    ใช้ตัดสินว่า text layer ของ PDF เชื่อถือได้ไหมก่อนเอาไปเป็นเฉลย
+
+    ที่มา: พบไฟล์รายงานวิจัยที่ text layer มีฟอนต์แมปผิด สระกับวรรณยุกต์
+    ออกมาเป็นสัญลักษณ์ 'ชื=อโครงการ' ควรเป็น 'ชื่อโครงการ'
+    ถ้าปล่อยเข้าไปเป็นเฉลย ทุก engine จะถูกวัดกับข้อความที่ผิด
+    แล้วได้คะแนนต่ำทั้งที่อ่านถูก
+    """
+    thai = sum(1 for ch in text if "ก" <= ch <= "๛")
+    if not thai:
+        return 0.0
+    return len(_BROKEN_GLYPH.findall(text)) / thai * 1000
+
+
 def extract_text_layer(
     pdf_path: Path, *, drop_repeating: bool = True
 ) -> tuple[dict[str, TruthPage], set[str]]:
@@ -99,6 +165,16 @@ def extract_text_layer(
     doc_id = doc_id_for(pdf_path)
     raw_pages: dict[str, list[str]] = {}
 
+    # ตั้งใจใช้ get_text("text") ที่รวมตัวยกไว้ในบรรทัดตามเดิม ไม่ตัดออก
+    #
+    # เคยลองตัดตัวยกออกแล้วพบว่าแย่ลง — เลขเชิงอรรถในกฎหมายไทยพิมพ์ติดกับ
+    # เลขมาตรา OCR ทุกตัวที่อ่านหน้านั้นถูกจึงได้ "มาตรา ๑๔๑๓" เหมือนกันหมด
+    # (ยืนยันกับ typhoon-api-num และ tesseract-tha) การตัดออกจากเฉลยฝ่ายเดียว
+    # ทำให้สองฝั่งใช้กติกาคนละแบบ วัดแล้ว CER ของ Typhoon แย่ลงจาก 0.08%
+    # เป็น 0.252% ทั้งที่ไม่มีอะไรในตัว engine เปลี่ยน
+    #
+    # ถ้าต้องการเลขมาตราที่แยกจากเชิงอรรถ (เช่นตัวตรวจลำดับมาตรา)
+    # ให้ใช้ page_lines_without_superscripts() แยกต่างหาก อย่าเปลี่ยนเฉลย
     with pymupdf.open(pdf_path) as doc:
         for idx, page in enumerate(doc, start=1):
             raw_pages[f"{doc_id}_p{idx:03d}"] = _clean_lines(page.get_text("text"))
@@ -117,6 +193,7 @@ def build_from_sources(source_dir: Path | None = None) -> dict[str, TruthPage]:
     ensure_dirs()
     source_dir = source_dir or SOURCE_DIR
     everything: dict[str, TruthPage] = {}
+    skipped: list[tuple[str, float, int]] = []
 
     for pdf_path in sorted(source_dir.glob("*.pdf")):
         with pymupdf.open(pdf_path) as doc:
@@ -125,12 +202,30 @@ def build_from_sources(source_dir: Path | None = None) -> dict[str, TruthPage]:
             continue
 
         pages, dropped = extract_text_layer(pdf_path)
+
+        # ไม่รับ text layer ที่ฟอนต์แมปผิด ยอมไม่มีเฉลยดีกว่ามีเฉลยที่ผิด
+        # เพราะเฉลยผิดจะลงโทษ engine ที่อ่านถูกโดยไม่มีอะไรฟ้อง
+        rate = broken_glyph_rate("\n".join(p.text for p in pages.values()))
+        if rate >= BROKEN_PER_1000:
+            skipped.append((pdf_path.stem, rate, len(pages)))
+            continue
+
         everything.update(pages)
 
         report = TRUTH_DIR / f"{doc_id_for(pdf_path)}_dropped.json"
         report.write_text(
             json.dumps(sorted(dropped), ensure_ascii=False, indent=2), encoding="utf-8"
         )
+
+    # เก็บเฉลยที่คนพิมพ์เองไว้ ไม่ให้ถูกลบตอนดึงใหม่จาก text layer
+    for page_id, page in load().items():
+        if page.source != "text_layer":
+            everything[page_id] = page
+
+    if skipped:
+        print("ข้าม text layer ที่ฟอนต์แมปผิด (ยอมไม่มีเฉลยดีกว่าเฉลยผิด)")
+        for name, rate, n in skipped:
+            print(f"  {name}  {n} หน้า  อักขระแปลกกลางคำ {rate:.1f} ต่อพันตัว")
 
     save(everything)
     return everything
