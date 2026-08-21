@@ -1255,6 +1255,34 @@ def _engine_record(
 
 
 # ── หน้า 4 สรุปผล ────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False, max_entries=4096)
+def scored_page(truth_lines: list[str], pred_lines: tuple[str, ...]) -> dict:
+    """คะแนนของหนึ่ง (หน้า, engine) — แคชไว้เพราะแท็บสรุปผลคำนวณใหม่ทุก rerun
+
+    st.tabs() รันเนื้อหาทุกแท็บทุกรอบ แค่ซ่อนด้วย CSS แท็บสรุปผลจึงจับคู่
+    ทุก engine กับทุกหน้าที่มีเฉลยใหม่ทั้งหมด แม้ผู้ใช้จะอยู่แท็บอื่น
+    วัดแล้ว 215 คู่ใช้ 3.7 วินาที ทุกครั้งที่กดอะไรก็ตาม และโตตามผลที่สะสม
+
+    ผลของ (เฉลย, ข้อความที่อ่านได้) คู่หนึ่งไม่มีวันเปลี่ยน จึงแคชได้ปลอดภัย
+    รับ pred_lines เป็น tuple เพื่อให้ hash ได้
+    """
+    lines = list(pred_lines)
+    score = align_lines(truth_lines, lines)
+    report = thai_digit_report("\n".join(truth_lines), "\n".join(lines))
+    n = int(report["total"] or 0)
+    return {
+        "edits": sum(s.edits for s in score.matched),
+        "chars": sum(s.truth_len for s in score.matched),
+        "missed": score.missed_lines,
+        "found": score.truth_lines - score.missed_lines,
+        "spurious": score.spurious_lines,
+        "page_cer": page_cer(truth_lines, lines),
+        "d_total": n,
+        "d_strict": round(float(report["strict"] or 0) * n),
+        "d_lenient": round(float(report["lenient"] or 0) * n),
+    }
+
+
 def view_summary(pages: list[PageInfo], results: dict) -> None:
     st.subheader("สรุปผลรวม")
 
@@ -1283,24 +1311,20 @@ def view_summary(pages: list[PageInfo], results: dict) -> None:
                 stored = per_page.get(page.page_id)
                 if stored is None or not stored.ok:
                     continue
-                truth_lines = truth[page.page_id].lines
-                score = align_lines(truth_lines, stored.lines)
-                whole = page_cer(truth_lines, stored.lines)
-                if whole is not None:
-                    page_cers.append(whole)
-                edits += sum(s.edits for s in score.matched)
-                chars += sum(s.truth_len for s in score.matched)
-                missed += score.missed_lines
-                found += score.truth_lines - score.missed_lines
-                spurious += score.spurious_lines
+                sc = scored_page(truth[page.page_id].lines, tuple(stored.lines))
+                if sc["page_cer"] is not None:
+                    page_cers.append(sc["page_cer"])
+                edits += sc["edits"]
+                chars += sc["chars"]
+                missed += sc["missed"]
+                found += sc["found"]
+                spurious += sc["spurious"]
                 times.append(stored.core_ms / 1000)
 
-                report = thai_digit_report("\n".join(truth_lines), "\n".join(stored.lines))
-                if report["total"]:
-                    n = int(report["total"])
-                    d_total += n
-                    d_strict += round(float(report["strict"] or 0) * n)
-                    d_lenient += round(float(report["lenient"] or 0) * n)
+                if sc["d_total"]:
+                    d_total += sc["d_total"]
+                    d_strict += sc["d_strict"]
+                    d_lenient += sc["d_lenient"]
 
             if not chars:
                 continue
