@@ -852,36 +852,33 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         f"หน้า {p.page_no}" + ("" if p.page_id in truth else "  ·  ยังไม่มีเฉลย"): p
         for p in subset
     }
-    # ตำแหน่งหน้าเก็บเป็นดัชนีในคีย์ของเราเอง ไม่ใช่คีย์ของ widget
-    # จะได้ให้ปุ่มเลื่อนหน้าแก้ค่าได้ ดูเหตุผลที่ปุ่มด้านล่าง
-    want = min(st.session_state.get(NAV_KEY, 0), len(page_labels) - 1)
-    picked_label = top[1].selectbox(
-        "หน้า",
-        list(page_labels),
-        index=max(0, want),
-        label_visibility="collapsed",
-        key="cmp_page",
-    )
-    picked = page_labels[picked_label]
-    # ถ้าผู้ใช้เลือกเองจาก dropdown ต้องให้ตำแหน่งที่จำไว้ตามไปด้วย
-    st.session_state[NAV_KEY] = list(page_labels).index(picked_label)
-
-    # ปุ่มเลื่อนหน้า — งานหลักของแท็บนี้คือไล่ตรวจทีละหน้า เปิด dropdown ทุกครั้งช้ากว่ามาก
-    #
-    # ห้ามเขียนทับ st.session_state["cmp_page"] ซึ่งเป็นคีย์ของ selectbox
-    # Streamlit ห้ามแก้ค่าของคีย์ที่ widget ถูกสร้างไปแล้วในรอบเดียวกัน
-    # แม้จะเรียก st.rerun() ต่อทันทีก็ตาม (โยน StreamlitAPIException)
-    # จึงเก็บตำแหน่งไว้ในคีย์ของเราเอง แล้วส่งเข้า selectbox ทาง index แทน
     keys = list(page_labels)
-    here = keys.index(picked_label)
+
+    # ปุ่มเลื่อนหน้าต้องมาก่อน selectbox ในลำดับโค้ด แม้จะแสดงผลอยู่ถัดไปทางขวา
+    # (คอลัมน์คุมตำแหน่งที่วาด ส่วนลำดับโค้ดคุมลำดับการทำงาน)
+    #
+    # เพราะทางเดียวที่จะเปลี่ยนค่าของ selectbox ที่มี key ได้ คือเขียน
+    # st.session_state["cmp_page"] ก่อนที่ widget จะถูกสร้างในรอบนั้น
+    # เขียนทีหลังจะโยน StreamlitAPIException ส่วนการส่ง index= ก็ไม่มีผล
+    # เพราะเมื่อ widget มี key แล้ว Streamlit จะใช้ค่าที่จำไว้ทับ index เสมอ
+    # (ลองมาแล้วทั้งสองแบบ แบบแรกพัง แบบหลังกดแล้วหน้าไม่ขยับ)
+    if st.session_state.get("cmp_page") not in keys:
+        st.session_state.pop("cmp_page", None)  # เปลี่ยนเอกสารแล้วรายการหน้าเปลี่ยนตาม
+    here = keys.index(st.session_state.get("cmp_page", keys[0]))
+
     if top[2].button("‹", disabled=here == 0, use_container_width=True,
                      help="หน้าก่อนหน้า"):
-        st.session_state[NAV_KEY] = here - 1
+        st.session_state["cmp_page"] = keys[here - 1]
         st.rerun()
     if top[3].button("›", disabled=here >= len(keys) - 1, use_container_width=True,
                      help="หน้าถัดไป"):
-        st.session_state[NAV_KEY] = here + 1
+        st.session_state["cmp_page"] = keys[here + 1]
         st.rerun()
+
+    picked_label = top[1].selectbox(
+        "หน้า", keys, label_visibility="collapsed", key="cmp_page"
+    )
+    picked = page_labels[picked_label]
     # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
     # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
     all_engines = sorted(results)
@@ -1071,9 +1068,6 @@ def cached_image(path: Path) -> tuple[str, int, int]:
     stamp = path.stat().st_mtime if path.exists() else 0.0
     return _cached_image(str(path), stamp)
 
-
-# ตำแหน่งหน้าที่กำลังดูในแท็บเปรียบเทียบ แยกจากคีย์ของ widget โดยตั้งใจ
-NAV_KEY = "cmp_page_index"
 
 
 CLEAN_SUFFIX = "+clean"
