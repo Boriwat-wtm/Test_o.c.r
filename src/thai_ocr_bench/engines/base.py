@@ -126,6 +126,7 @@ def load_all() -> None:
         "typhoon",
         "typhoon_api",
         "thai_trocr",
+        "thai_trocr_openthaigpt",
     ):
         try:
             import_module(f".{module}", package=__package__)
