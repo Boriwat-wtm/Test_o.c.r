@@ -114,6 +114,10 @@ def collect_suspects(results: dict, engine: str) -> list[Suspect]:
         [ln for lines, _ in per[engine].values() for ln in lines]
     )
 
+    # ไม่รวม section_length_outliers ตรงนี้ — จุดที่กฎนั้นจับมักไม่มีกล่อง
+    # (ดูเหตุผลใน suspect.section_suspects) ครอปไปอ่านซ้ำไม่ได้อยู่แล้ว
+    # จึงกรองทิ้งด้วย `if s.box` ข้างล่างนี้พอดี
+
     out: list[Suspect] = []
     for pid in sorted(per[engine]):
         page = {n: v[pid] for n, v in per.items() if pid in v}

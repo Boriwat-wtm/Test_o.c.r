@@ -15,7 +15,9 @@ from thai_ocr_bench.suspect import (
     pick_grid,
     rule_findings,
     scan_page,
+    section_findings_by_document,
     section_length_outliers,
+    section_suspects,
     thai_digit_document,
 )
 
@@ -87,6 +89,39 @@ class TestSectionLengthOutliers:
         """เอกสารที่มีมาตราเกิน ๑๑๓ จริงต้องไม่โดนเตือนผิด ถ้าความยาวสม่ำเสมอ"""
         page = [f"มาตรา {n} ก" for n in ("๑๒๐", "๑๒๑", "๑๒๒", "๑๒๓")]
         assert section_length_outliers(page) == {}
+
+
+class TestSectionFindingsByDocument:
+    """หน้าเดียวมักมีเลขมาตราน้อยเกินจะตั้งฐานนิยมได้ ต้องรวมทั้งเอกสารก่อน"""
+
+    def test_baseline_needs_the_whole_document_not_one_page(self):
+        pages = {
+            "p1": ["มาตรา ๙ ก", "มาตรา ๑๐๑๑ ข"],  # หน้านี้เดียวมีแค่ ๒ ค่า ไม่พอ
+            "p2": ["มาตรา ๑๒ ค", "มาตรา ๑๓ ง"],  # รวมกับหน้านี้ครบ ๔ ค่าแล้วตัดสินได้
+        }
+        found = section_findings_by_document(pages)
+        assert list(found) == ["p1"]
+        assert found["p1"][1][0][2] == "๑๐"  # ตัดกลับเหลือ ๒ หลักเท่าหน้าอื่น
+
+    def test_unknown_line_index_is_skipped_safely(self):
+        assert section_findings_by_document({"p1": ["ไม่มีมาตราเลย"]}) == {}
+
+
+class TestSectionSuspects:
+    """แปลง findings ให้เป็น Suspect — ไม่มีกล่องเพราะไม่ได้ผ่านกริด"""
+
+    def test_builds_a_boxless_suspect_per_flagged_line(self):
+        lines = ["มาตรา ๑๓ ก", "มาตรา ๑๔๑๓ ให้มีคณะกรรมการ"]
+        findings = {1: [(6, 10, "๑๔", "เลขมาตรายาวผิดปกติ")]}
+        out = section_suspects("p1", "typhoon-api-num", lines, findings)
+        assert len(out) == 1
+        assert out[0].grid_line == 1
+        assert out[0].text == lines[1]
+        assert out[0].box is None
+        assert out[0].findings[0].layer == "rule"
+
+    def test_out_of_range_line_index_is_ignored(self):
+        assert section_suspects("p1", "e", ["บรรทัดเดียว"], {5: [(0, 1, "x", "y")]}) == []
 
 
 class TestVoteLayer:

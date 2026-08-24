@@ -38,7 +38,10 @@ from thai_ocr_bench.metrics import (
 from thai_ocr_bench.render import PageInfo, load_pages, render_all
 from thai_ocr_bench.suspect import (
     independent_peers,
+    rule_findings,
     scan_page,
+    section_findings_by_document,
+    section_suspects,
     thai_digit_document,
 )
 from thai_ocr_bench.viewer import (
@@ -189,6 +192,30 @@ def spans_to_inner(spans: list[Span]) -> str:
             out.append(
                 f'<span class="missing" data-tip="ตกหล่น — engine ไม่ได้อ่านส่วนนี้">{text}</span>'
             )
+    return "".join(out)
+
+
+def rule_findings_inner(line: str, *, thai_doc: bool) -> str:
+    """ไฮไลต์จุดที่กฎตายตัวจับได้ (ไม่ใช้เฉลย ไม่ใช้ engine อื่น) ในแท็บเปรียบเทียบ
+
+    ทำไมต้องมีตัวนี้แยกจาก spans_to_inner — ตัวนั้นไฮไลต์จากการเทียบกับเฉลย
+    ซึ่งหน้าที่ยังไม่มีเฉลย (กรณีจริงส่วนใหญ่) จะไม่มีอะไรขึ้นเลย ทั้งที่
+    suspect.rule_findings ไม่ต้องใช้เฉลยอยู่แล้ว ควรโชว์ได้ทุกหน้าไม่ว่าจะมี
+    เฉลยหรือไม่ ผู้ใช้จะได้ไม่ต้องสลับไปแท็บ "จุดน่าสงสัย" เพื่อดูแค่ชั้นนี้
+
+    ไม่รวมชั้นโหวตข้ามเครื่อง (cross_engine_findings) เพราะต้องใช้บรรทัดที่
+    จัดกริดเรียบร้อยแล้วจากหน้าอื่น (peer engines ตำแหน่งเดียวกัน) ซึ่งการ์ด
+    ในแท็บนี้แสดงทีละ engine อิสระจากกัน ยังไม่มีข้อมูลนั้นให้หยิบใช้
+    """
+    out = []
+    cursor = 0
+    for start, end, fix, why in rule_findings(line, thai_doc=thai_doc):
+        out.append(html.escape(line[cursor:start]))
+        tip = f"{why} — น่าจะเป็น: {fix}"
+        out.append(f'<span class="wrong" data-tip="{html.escape(tip)}">'
+                    f'{html.escape(line[start:end]) or "␣"}</span>')
+        cursor = end
+    out.append(html.escape(line[cursor:]))
     return "".join(out)
 
 
@@ -654,10 +681,22 @@ def _scan_suspects(engine: str, _results: dict) -> list:
     thai_doc = thai_digit_document(
         [ln for lines, _ in per_engine[engine].values() for ln in lines]
     )
+
+    # เลขมาตรายาวผิดปกติต้องตั้งฐานนิยมจากทั้งเอกสาร ไม่ใช่ทีละหน้า (หน้าเดียว
+    # มักมีเลขมาตราน้อยเกินจะตั้งฐานนิยมได้แม่น — ดู section_findings_by_document)
+    by_doc: dict[str, dict[str, list[str]]] = {}
+    for pid, (lines, _boxes) in per_engine[engine].items():
+        by_doc.setdefault(pid.rsplit("_p", 1)[0], {})[pid] = lines
+    section_findings: dict[str, dict[int, list]] = {}
+    for doc_pages in by_doc.values():
+        section_findings.update(section_findings_by_document(doc_pages))
+
     out = []
     for pid in sorted(per_engine[engine]):
         page = {n: v[pid] for n, v in per_engine.items() if pid in v}
         out.extend(scan_page(pid, engine, page, thai_doc=thai_doc))
+        lines = per_engine[engine][pid][0]
+        out.extend(section_suspects(pid, engine, lines, section_findings.get(pid, {})))
     return out
 
 
@@ -680,7 +719,8 @@ def view_suspects(pages: list[PageInfo], results: dict) -> None:
     st.subheader("จุดน่าสงสัย")
     st.caption(
         "หาจุดที่น่าจะอ่านผิดโดยไม่ใช้เฉลย — ใช้ได้กับเอกสารที่ยังไม่มีใครทำเฉลย "
-        "สองชั้น: กฎตายตัว (เลขยกกำลัง เลขอารบิกปนในเอกสารเลขไทย) "
+        "กฎตายตัว (เลขยกกำลัง เลขอารบิกปนในเอกสารเลขไทย เลขมาตรายาวผิดปกติเทียบ"
+        "กับทั้งเอกสาร — จุดหลังไม่มีภาพครอปให้เพราะไม่ผ่านกริดตำแหน่ง) "
         "และการที่ engine อื่นตั้งแต่สองตัวขึ้นไปอ่านได้ไม่ตรงกับตัวนี้"
     )
     if not results:
@@ -1107,10 +1147,11 @@ def _unscored_record(name: str, stored) -> EngineRecord:
             }
         )
 
+    thai_doc = thai_digit_document(stored.lines)
     lines = [
         LineRecord(
             kind="matched",
-            html=html.escape(line),
+            html=rule_findings_inner(line, thai_doc=thai_doc),
             box=stored.boxes[i] if i < len(stored.boxes) else None,
             conf=stored.confidences[i] if i < len(stored.confidences) else None,
         )

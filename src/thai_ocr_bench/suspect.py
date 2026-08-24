@@ -128,8 +128,68 @@ def section_length_outliers(
         guess = digits[:mode_len]
         out.setdefault(line_idx, []).append((
             start, end, guess,
-            f"เลขมาตรายาว {len(digits)} หลัก ทั้งที่ส่วนใหญ่ในหน้านี้ยาว {mode_len} หลัก "
+            f"เลขมาตรายาว {len(digits)} หลัก ทั้งที่ส่วนใหญ่ในเอกสารนี้ยาว {mode_len} หลัก "
             "— น่าจะมีเลขเชิงอรรถต่อท้ายมา",
+        ))
+    return out
+
+
+def section_findings_by_document(
+    pages: dict[str, list[str]],
+) -> dict[str, dict[int, list[tuple[int, int, str, str]]]]:
+    """หา section_length_outliers ของหลายหน้าที่เป็นเอกสารเดียวกัน โดยคำนวณ
+    ฐานนิยมจากเลขมาตราทั้งเอกสารรวมกัน ไม่ใช่ทีละหน้า
+
+    ทำไมต้องรวมก่อน — วัดจริงพบว่าคำนวณฐานนิยมทีละหน้า (ที่ scan_page ทำอยู่
+    เดิม) จับได้แค่ 4 จุด จาก 32 จุดที่มีจริง เพราะหน้าเดียวมักมีเลขมาตราแค่
+    2-4 ค่า ไม่พอตั้งฐานนิยมให้น่าเชื่อถือ (min_samples ของ
+    section_length_outliers กันไว้ไม่ให้เดาจากตัวอย่างน้อยเกินไปอยู่แล้ว)
+    พอรวมทั้งเอกสาร (ทุกหน้าของ เอกสารเดียวกัน มีเลขมาตราเรียงต่อเนื่องกัน
+    อยู่แล้วตามธรรมชาติของกฎหมาย) จับได้ครบ 32/32
+
+    pages ต้องเป็นหน้าของเอกสารเดียวกันเท่านั้น (ผู้เรียกเป็นคนแบ่งตาม
+    doc_id เอง เพราะโมดูลนี้ไม่รู้จักโครงสร้างเอกสาร เป็นเรื่องของ render.py)
+    คืนค่าแยกกลับเป็นรายหน้าเพื่อให้ส่งเข้า scan_page(extra_findings=...) ได้ตรง
+    """
+    flat: list[tuple[str, int]] = []  # (page_id, ดัชนีบรรทัดในหน้านั้น)
+    all_lines: list[str] = []
+    for pid, lines in pages.items():
+        for i, ln in enumerate(lines):
+            flat.append((pid, i))
+            all_lines.append(ln)
+
+    out: dict[str, dict[int, list[tuple[int, int, str, str]]]] = {}
+    for flat_idx, items in section_length_outliers(all_lines).items():
+        pid, line_idx = flat[flat_idx]
+        out.setdefault(pid, {}).setdefault(line_idx, []).extend(items)
+    return out
+
+
+def section_suspects(
+    page_id: str,
+    engine: str,
+    lines: list[str],
+    findings: dict[int, list[tuple[int, int, str, str]]],
+) -> list[Suspect]:
+    """แปลงผลของ section_findings_by_document ให้เป็น Suspect สำหรับหน้าเว็บ
+
+    ไม่มีกล่องให้เลย (box=None) เพราะ findings มาจากบรรทัดดิบของ engine เอง
+    ไม่ได้ผ่านกริดที่คู่กับพิกัดภาพ (เหตุผลเดียวกับที่ scan_page ไม่รวมกฎนี้
+    ไว้ในตัว) หน้าเว็บจะแสดงได้แต่ไม่มีภาพครอปให้จุดพวกนี้ ยังดีกว่าไม่แสดงเลย
+    """
+    out: list[Suspect] = []
+    for line_idx, items in findings.items():
+        if line_idx >= len(lines):
+            continue
+        text = lines[line_idx]
+        out.append(Suspect(
+            page_id=page_id,
+            engine=engine,
+            grid_line=line_idx,
+            text=text,
+            findings=[
+                Finding(s, e, text[s:e], fix, why, "rule") for s, e, fix, why in items
+            ],
         ))
     return out
 
@@ -359,28 +419,25 @@ def scan_page(
     pages คือ {ชื่อ engine: (บรรทัด, พิกัด)} ของทุกตัวบนหน้าเดียวกัน รวมตัวเป้าหมาย
 
     ไม่ใช้เฉลยเลย จึงใช้กับเอกสารที่ยังไม่มีคนทำเฉลยได้ ซึ่งเป็นกรณีของงานจริง
+
+    ตั้งใจไม่รวม section_length_outliers ไว้ในนี้ แม้จะเป็นกฎตายตัวเหมือนกัน
+    เพราะกฎนั้นต้องดูบรรทัดดิบของ engine เอง การจัดกริดในนี้ (align_lines
+    เทียบกับ grid_engine) มักตัดเลขมาตราที่ต่อกันให้ขาดเป็นคนละแถวกริด จนกฎ
+    จับไม่เจอเกือบหมด (วัดแล้ว: ผ่านกริดจับได้ 4/31 จุด ไม่ผ่านกริดจับได้ 31/31)
+    ผู้เรียกที่มีบรรทัดดิบทั้งเอกสารอยู่แล้วจึงควรเรียก section_suspects()
+    แยกต่างหาก แล้วเอาผลมาต่อกับผลจากฟังก์ชันนี้เอง (ดู app.py._scan_suspects)
     """
     grid_engine = grid_engine or pick_grid(pages)
     if grid_engine is None or engine not in pages:
         return []
 
-    grid = build_grid(pages, grid_engine)
-    # ต้องดูทั้งหน้าของ engine เป้าหมายพร้อมกันครั้งเดียว ไม่ใช่ทีละแถวในลูปข้างล่าง
-    # เพราะฐานนิยมของความยาวเลขมาตราคำนวณได้ก็ต่อเมื่อเห็นทุกบรรทัดพร้อมกัน
-    page_findings = section_length_outliers([row.reads.get(engine, "") for row in grid])
-
     out: list[Suspect] = []
-    for row in grid:
+    for row in build_grid(pages, grid_engine):
         mine = row.reads.get(engine, "")
         if not mine.strip():
             continue
         peers = [t for n, t in row.reads.items() if n != engine and t.strip()]
         findings = find_in_line(mine, peers, thai_doc=thai_doc)
-        findings += [
-            Finding(s, e, mine[s:e], fix, why, "rule")
-            for s, e, fix, why in page_findings.get(row.index, [])
-        ]
-        findings.sort(key=lambda f: (f.start, f.end))
         if findings:
             out.append(
                 Suspect(
