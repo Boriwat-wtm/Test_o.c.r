@@ -74,68 +74,116 @@ def highlight(text: str, findings: list) -> str:
     return f'<div class="ln">{"".join(marks)}</div>'
 
 
+def _summary_bar(engine: str, suspects: list, results: dict) -> None:
+    """แถวตัวเลขบนสุด — บอกว่าต้องตรวจเยอะแค่ไหนก่อนจะเริ่มไล่ดู"""
+    total_lines = sum(len(p.lines) for p in results[engine].values())
+    rule = sum(1 for s in suspects if "rule" in s.layers)
+    vote = sum(1 for s in suspects if "vote" in s.layers)
+
+    a, b, c, d = st.columns(4)
+    a.metric("บรรทัดทั้งหมด", f"{total_lines:,}")
+    b.metric(
+        "จุดน่าสงสัย",
+        len(suspects),
+        f"{len(suspects) / total_lines:.1%} ของทั้งหมด" if total_lines else None,
+        delta_color="off",
+    )
+    c.metric("จากกฎตายตัว", rule, "ตัดสินได้เอง", delta_color="off")
+    d.metric("จาก engine อื่น", vote, "ต้องดูภาพ", delta_color="off")
+
+
 def view_suspects(pages: list[PageInfo], results: dict) -> None:
     st.subheader("จุดน่าสงสัย")
     st.caption(
-        "หาจุดที่น่าจะอ่านผิดโดยไม่ใช้เฉลย — ใช้ได้กับเอกสารที่ยังไม่มีใครทำเฉลย "
-        "กฎตายตัว (เลขยกกำลัง เลขอารบิกปนในเอกสารเลขไทย เลขมาตรายาวผิดปกติเทียบ"
-        "กับทั้งเอกสาร — จุดหลังไม่มีภาพครอปให้เพราะไม่ผ่านกริดตำแหน่ง) "
-        "และการที่ engine อื่นตั้งแต่สองตัวขึ้นไปอ่านได้ไม่ตรงกับตัวนี้"
+        "หาจุดที่น่าจะอ่านผิดโดยไม่ใช้เฉลย จึงใช้กับเอกสารที่ยังไม่มีใครทำเฉลยได้ "
+        "— ซึ่งเป็นกรณีของงานจริง"
     )
     if not results:
         st.warning("ยังไม่มีผล OCR")
         return
 
-    top = st.columns([2, 1, 1])
+    top = st.columns([2.2, 1.4, 1.4])
     engine = top[0].selectbox("ตรวจ engine", sorted(results))
-    only = top[1].selectbox("กรองชั้น", ["ทั้งหมด", "กฎตายตัว", "engine อื่นไม่เห็นด้วย"])
-    show_crop = top[2].toggle("แสดงภาพครอป", value=True)
+    only = top[1].selectbox(
+        "กรองชั้น",
+        ["ทั้งหมด", "กฎตายตัว", "engine อื่นไม่เห็นด้วย"],
+        help="กฎตายตัว = ตัดสินได้โดยไม่ต้องดูภาพ · "
+        "engine อื่นไม่เห็นด้วย = ต้องเปิดภาพดูเอง",
+    )
+    per_page = top[2].number_input(
+        "แสดงกี่จุดต่อครั้ง", min_value=10, max_value=500, value=25, step=25,
+        help="ของเดิมกางทุกจุดพร้อมภาพครอปทั้งหมด หน้าจึงยาวจนเลื่อนหาไม่เจอ",
+    )
 
     suspects = _scan_suspects(engine, results)
     want = {"กฎตายตัว": "rule", "engine อื่นไม่เห็นด้วย": "vote"}.get(only)
     if want:
         suspects = [s for s in suspects if want in s.layers]
 
+    _summary_bar(engine, suspects, results)
+
     voters = independent_peers(engine, list(results))
     st.caption(
         "ผู้โหวต: " + (" · ".join(voters) if voters else "ไม่มี — เหลือแต่ชั้นกฎตายตัว")
     )
 
-    total_lines = sum(len(p.lines) for p in results[engine].values())
-    a, b, c = st.columns(3)
-    a.metric("บรรทัดทั้งหมด", total_lines)
-    b.metric("จุดน่าสงสัย", len(suspects))
-    c.metric("สัดส่วนที่ต้องตรวจ", f"{len(suspects) / total_lines:.1%}" if total_lines else "-")
-
     if not suspects:
         st.success("ไม่พบจุดน่าสงสัย — ไม่ได้แปลว่าไม่มีที่ผิด แปลว่าสองชั้นนี้จับไม่ได้")
         return
 
-    st.divider()
-    img_dir = image_dir_for(engine)
+    # จัดกลุ่มตามหน้า เพราะคนตรวจทำงานทีละหน้า ไม่ได้กระโดดข้ามหน้าไปมา
+    # ของเดิมเรียงเป็นรายการยาวเส้นเดียว ต้องเลื่อนหาว่าจุดไหนอยู่หน้าไหนเอง
+    by_page: dict[str, list] = {}
     for s in suspects:
-        with st.container(border=True):
-            head = st.columns([3, 2])
-            head[0].markdown(f"**{s.page_id}** · บรรทัดที่ {s.grid_line + 1}")
-            tags = " ".join(
-                pill("กฎตายตัว" if lay == "rule" else "engine อื่นไม่เห็นด้วย",
-                     "warn" if lay == "rule" else "bad")
-                for lay in sorted(s.layers)
-            )
-            head[1].markdown(tags, unsafe_allow_html=True)
+        by_page.setdefault(s.page_id, []).append(s)
 
-            if show_crop and s.box:
-                uri = _crop(str(img_dir / f"{s.page_id}.png"), s.box)
-                if uri:
-                    st.markdown(
-                        f'<img src="{uri}" style="width:100%;border-radius:.5rem;'
-                        f'border:1px solid var(--border)">',
-                        unsafe_allow_html=True,
+    shown = 0
+    img_dir = image_dir_for(engine)
+    st.divider()
+
+    for page_id, items in by_page.items():
+        if shown >= per_page:
+            break
+        with st.expander(f"**{page_id}** · {len(items)} จุด", expanded=shown == 0):
+            for s in items:
+                if shown >= per_page:
+                    st.caption("— เหลืออีกในหน้านี้ เพิ่มจำนวนที่แสดงด้านบน —")
+                    break
+                shown += 1
+
+                tags = " ".join(
+                    pill(
+                        "กฎตายตัว" if lay == "rule" else "engine อื่นไม่เห็นด้วย",
+                        "warn" if lay == "rule" else "bad",
                     )
-                    st.caption(f"ครอปจากภาพจริง · พิกัด{' ' + s.box_from if s.box_from else ''}")
+                    for lay in sorted(s.layers)
+                )
+                st.markdown(
+                    f'<div class="lab">บรรทัดที่ {s.grid_line + 1}</div>{tags}',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(highlight(s.text, s.findings), unsafe_allow_html=True)
 
-            st.markdown(highlight(s.text, s.findings), unsafe_allow_html=True)
-            for f in s.findings:
-                st.caption(f"「{f.text}」 → น่าจะเป็น 「{f.suggestion}」 · {f.reason}")
+                for f in s.findings:
+                    st.caption(f"「{f.text}」 → น่าจะเป็น 「{f.suggestion}」 · {f.reason}")
 
+                # ภาพครอปซ่อนไว้ใต้ปุ่มกาง ไม่กางเอง — ของเดิมโหลดภาพทุกจุด
+                # พร้อมกันทำให้หน้าอืดและยาวมากเมื่อมีหลายสิบจุด
+                if s.box:
+                    with st.popover("ดูภาพครอป", use_container_width=False):
+                        uri = _crop(str(img_dir / f"{s.page_id}.png"), s.box)
+                        if uri:
+                            st.markdown(
+                                f'<img src="{uri}" style="width:100%;border-radius:.5rem;'
+                                f'border:1px solid var(--border)">',
+                                unsafe_allow_html=True,
+                            )
+                            st.caption(
+                                "ครอปจากภาพจริง · พิกัด"
+                                f"{' ' + s.box_from if s.box_from else ''}"
+                            )
+                else:
+                    st.caption("ไม่มีภาพครอป — จุดนี้มาจากกฎที่ดูทั้งเอกสาร ไม่ผูกกับพิกัด")
+                st.markdown("---")
 
+    st.caption(f"แสดง {shown} จาก {len(suspects)} จุด")

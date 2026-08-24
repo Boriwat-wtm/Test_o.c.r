@@ -221,7 +221,11 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     docs = sorted({p.doc_name for p in pages})
     per_doc = Counter(p.doc_name for p in pages)
 
-    top = st.columns([2.6, 1.25, 0.34, 0.34, 2.1, 0.95])
+    # แถวควบคุมมีสองหน้าที่ที่ไม่ควรปนกัน — "เลือกหน้าไหน" กับ "แสดงยังไง"
+    # ของเดิมยัดทั้งหกช่องเรียงกันในแถวเดียว ทำให้ช่องเลือกเอกสารกับ engine
+    # แคบจนอ่านชื่อไม่จบ ตอนนี้เหลือแต่การเลื่อนหน้าไว้ในแถว
+    # ส่วนตัวเลือกการแสดงผลย้ายไปอยู่ในปุ่มกาง ซึ่งตั้งครั้งเดียวแล้วแทบไม่แตะอีก
+    top = st.columns([3.4, 1.5, 0.4, 0.4, 1.5])
     doc = top[0].selectbox(
         "เอกสาร",
         docs,
@@ -264,19 +268,25 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
     # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
     all_engines = sorted(results)
-    chosen = (
-        top[4].multiselect(
-            "engine",
-            all_engines,
-            label_visibility="collapsed",
-            placeholder=f"ทุก engine ({len(all_engines)})",
+    with top[4].popover("⚙️ การแสดงผล", use_container_width=True):
+        chosen = (
+            st.multiselect(
+                "engine ที่จะแสดง",
+                all_engines,
+                placeholder=f"ทุก engine ({len(all_engines)})",
+                help="ว่างไว้ = แสดงทุกตัว",
+            )
+            or all_engines
         )
-        or all_engines
-    )
-    tall = top[5].selectbox(
-        "ความสูง", ["ปกติ", "สูง", "เต็มจอ"], label_visibility="collapsed"
-    )
+        tall = st.radio(
+            "ความสูงของหน้าต่าง", ["ปกติ", "สูง", "เต็มจอ"], horizontal=True
+        )
     height = {"ปกติ": 760, "สูง": 900, "เต็มจอ": 1100}[tall]
+
+    st.caption(
+        f"หน้า {here + 1} จาก {len(keys)} ในเอกสารนี้ · "
+        f"แสดง {len(chosen)} จาก {len(all_engines)} engine"
+    )
 
     image_path = IMAGE_DIR / f"{picked.page_id}.png"
     if not image_path.exists():
