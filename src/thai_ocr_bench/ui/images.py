@@ -26,15 +26,25 @@ def view_images(pages: list[PageInfo]) -> None:
         st.error("หน้าที่ยังตะแคง: " + ", ".join(p.page_id for p in sideways))
 
     docs = sorted({p.doc_name for p in pages})
-    chosen = st.selectbox("เอกสาร", docs)
+    top = st.columns([2.6, 1.2, 1.2])
+    chosen = top[0].selectbox("เอกสาร", docs)
     subset = [p for p in pages if p.doc_name == chosen]
 
-    st.caption(f"`/Rotate` = {subset[0].rotation}° · {len(subset)} หน้า")
-    cols = st.columns(4)
-    for i, page in enumerate(subset[:16]):
+    per_row = top[1].selectbox("รูปต่อแถว", [3, 4, 6, 8], index=1)
+    # ของเดิมตัดที่ 16 หน้าเงียบ ๆ ไม่บอกว่ายังมีต่อ เอกสาร 54 หน้าจึงเห็นไม่ถึง
+    # หนึ่งในสามโดยไม่รู้ตัว ตอนนี้บอกจำนวนจริงและกดดูเพิ่มได้
+    limit = top[2].selectbox("แสดงกี่หน้า", [16, 32, 64, "ทั้งหมด"], index=0)
+    show = subset if limit == "ทั้งหมด" else subset[: int(limit)]
+
+    st.caption(
+        f"`/Rotate` = {subset[0].rotation}° · เอกสารนี้มี {len(subset)} หน้า · "
+        f"แสดง {len(show)} หน้า"
+    )
+    cols = st.columns(per_row)
+    for i, page in enumerate(show):
         image = IMAGE_DIR / f"{page.page_id}.png"
         if image.exists():
-            with cols[i % 4]:
+            with cols[i % per_row]:
                 with st.container(border=True):
                     st.image(
                         str(image),

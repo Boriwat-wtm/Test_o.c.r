@@ -77,17 +77,40 @@ def view_rescue(pages: list[PageInfo], results: dict) -> None:
 
     changed = [r for r in items if r.get("changed")]
     failed = [r for r in items if r.get("error")]
+    # agree มีเฉพาะตอนรันด้วย --samples N (อ่านซ้ำหลายรอบแบบสุ่ม)
+    # ผลรอบเก่าที่รันก่อนมีฟีเจอร์นี้จะไม่มีคีย์นี้เลย จึงต้องเช็กว่ามีจริงก่อน
+    unstable = [r for r in items if r.get("agree") is False]
+    has_variants = any(r.get("agree") is not None for r in items)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("จุดที่อ่านซ้ำ", len(items))
-    c2.metric("ข้อความเปลี่ยน", len(changed))
-    c3.metric("อ่านไม่สำเร็จ", len(failed))
+    cols = st.columns(4 if has_variants else 3)
+    cols[0].metric("จุดที่อ่านซ้ำ", len(items))
+    cols[1].metric("ข้อความเปลี่ยน", len(changed))
+    cols[2].metric("อ่านไม่สำเร็จ", len(failed))
+    if has_variants:
+        cols[3].metric(
+            "ไม่มั่นใจ", len(unstable), "ตอบไม่ตรงกันแต่ละรอบ", delta_color="off"
+        )
     st.caption(f"engine ที่ใช้อ่านซ้ำ: `{engine}`")
 
-    only_changed = st.checkbox("แสดงเฉพาะจุดที่ข้อความเปลี่ยน", value=True)
-    shown = changed if only_changed else items
+    choices = ["เฉพาะที่ข้อความเปลี่ยน", "ทั้งหมด"]
+    if has_variants:
+        choices.insert(1, "เฉพาะที่ไม่มั่นใจ")
+    mode = st.radio("แสดง", choices, horizontal=True, label_visibility="collapsed")
+    shown = {
+        "เฉพาะที่ข้อความเปลี่ยน": changed,
+        "เฉพาะที่ไม่มั่นใจ": unstable,
+        "ทั้งหมด": items,
+    }[mode]
+
+    if not has_variants:
+        st.caption(
+            "อยากรู้ว่าจุดไหน engine เองก็ไม่มั่นใจ ให้รันด้วย "
+            "`rescue.py --engine typhoon-2b --samples 3` — จะอ่านซ้ำหลายรอบแบบสุ่ม "
+            "แล้วเทียบว่าตอบตรงกันไหม (ใช้ได้เฉพาะ engine ที่รันในเครื่อง)"
+        )
+
     if not shown:
-        st.success("อ่านซ้ำแล้วไม่มีจุดไหนเปลี่ยน — ผลเดิมน่าจะถูกอยู่แล้ว")
+        st.success("ไม่มีจุดที่เข้าเงื่อนไขนี้ — ผลเดิมน่าจะถูกอยู่แล้ว")
         return
 
     byid = {p.page_id: p for p in pages}
@@ -95,6 +118,8 @@ def view_rescue(pages: list[PageInfo], results: dict) -> None:
         page = byid.get(r["page_id"])
         label = page_label(page) if page else r["page_id"]
         head = f"{label} · บรรทัดที่ {r['grid_line'] + 1}"
+        if r.get("agree") is False:
+            head = "⚠️ " + head + " · ไม่มั่นใจ"
         with st.expander(head, expanded=(i == 0)):
             # ครอปด้วยกรอบเดียวกับที่ rescue ใช้ จะได้เห็นสิ่งที่ engine เห็นตอนอ่านซ้ำ
             img = _crop(str(IMAGE_DIR / f"{r['page_id']}.png"), tuple(r["box"]), pad=24)
@@ -109,6 +134,21 @@ def view_rescue(pages: list[PageInfo], results: dict) -> None:
             a.code(r["before"] or "(ว่าง)")
             b.markdown("**อ่านซ้ำ** (ครอป · ขยาย 4 เท่า)")
             b.code(r["after"] or "(ว่าง)")
+
+            # อ่านซ้ำหลายรอบแบบสุ่มแล้วตอบไม่ตรงกัน = engine เองก็ไม่มั่นใจตรงนี้
+            # เป็นสัญญาณที่ได้จากตัว engine ล้วน ๆ ไม่ต้องพึ่ง engine อื่นมาเทียบ
+            variants = r.get("variants") or []
+            if len(variants) > 1:
+                if r.get("agree") is False:
+                    st.warning(
+                        f"อ่านซ้ำ {len(variants)} รอบได้คำตอบไม่ตรงกัน — "
+                        "จุดนี้ควรให้คนดูภาพเอง"
+                    )
+                    for j, v in enumerate(variants, 1):
+                        st.code(f"รอบ {j}: {v}")
+                else:
+                    st.success(f"อ่านซ้ำ {len(variants)} รอบได้เหมือนกันทุกรอบ")
+
             if r.get("error"):
                 st.error(f"อ่านซ้ำไม่สำเร็จ: {r['error']}")
 
