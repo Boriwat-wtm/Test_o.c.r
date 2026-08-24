@@ -12,7 +12,7 @@ from collections import Counter
 
 import streamlit as st
 
-from .. import history
+from .. import history, markdown_out
 from ..config import IMAGE_DIR
 from ..metrics import align_lines, compare, page_cer, thai_digit_report
 from ..render import PageInfo
@@ -321,7 +321,74 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         scrolling=False,
     )
 
+    edit_panel(picked, chosen, results)
     page_round_history(picked.page_id)
+
+
+def edit_panel(picked: PageInfo, chosen: list[str], results: dict) -> None:
+    """แก้ข้อความของหน้านี้เป็น markdown ได้เลยโดยไม่ต้องออกจากแท็บ
+
+    ตัวดูด้านบนเป็น HTML component ก้อนเดียวซึ่งแก้ในตัวมันไม่ได้
+    (ต้องส่งค่ากลับมาฝั่ง Python ซึ่ง component แบบฝัง html ทำไม่ได้)
+    จึงวางช่องแก้ไว้ใต้ตัวดูแทน — ยังเห็นภาพต้นฉบับอยู่ในจอเดียวกัน
+
+    เก็บเป็นไฟล์รายหน้าใน exports/pages/ แล้วตอนส่งออกทั้งเอกสารจากแท็บ
+    markdown จะหยิบฉบับที่แก้ไว้ไปใช้แทนผลดิบให้เอง
+    """
+    with st.expander("✏️ แก้ข้อความหน้านี้เป็น markdown", expanded=False):
+        usable = [
+            n for n in chosen
+            if (sp := results.get(n, {}).get(picked.page_id)) and sp.ok and sp.lines
+        ]
+        if not usable:
+            st.info("ยังไม่มี engine ตัวไหนอ่านหน้านี้ได้")
+            return
+
+        engine = st.selectbox(
+            "แก้จากผลของ engine",
+            usable,
+            key=f"md_edit_engine·{picked.page_id}",
+            help="เลือกตัวที่อ่านได้ดีที่สุดมาเป็นตัวตั้งต้น จะได้แก้น้อยที่สุด",
+        )
+
+        raw = "\n".join(results[engine][picked.page_id].lines)
+        saved = markdown_out.load_page(picked.page_id, engine)
+        if saved is not None:
+            st.success("หน้านี้แก้ไว้แล้ว — ด้านล่างคือฉบับที่แก้")
+        else:
+            st.caption("ยังไม่เคยแก้หน้านี้ — ด้านล่างคือผลดิบจาก OCR")
+
+        # key ผูกกับหน้า+engine ไม่งั้นสลับหน้าแล้ว Streamlit จำข้อความเดิมไว้
+        # ผู้ใช้จะเห็นของหน้าก่อนค้างอยู่แล้วเผลอกดบันทึกทับหน้าใหม่
+        text = st.text_area(
+            "markdown (แก้ได้)",
+            value=saved if saved is not None else raw,
+            height=320,
+            key=f"md_edit_text·{picked.page_id}·{engine}",
+            label_visibility="collapsed",
+        )
+
+        act = st.columns([1, 1, 2])
+        if act[0].button("บันทึก", type="primary", key=f"md_save·{picked.page_id}"):
+            markdown_out.save_page(picked.page_id, engine, text)
+            st.success("บันทึกแล้ว — จะถูกใช้แทนผลดิบตอนส่งออกทั้งเอกสาร")
+            st.rerun()
+
+        if saved is not None and act[1].button(
+            "ทิ้งที่แก้", key=f"md_reset·{picked.page_id}"
+        ):
+            markdown_out.clear_page(picked.page_id, engine)
+            st.session_state.pop(f"md_edit_text·{picked.page_id}·{engine}", None)
+            st.rerun()
+
+        act[2].caption(
+            f"{len([ln for ln in text.splitlines() if ln.strip()])} บรรทัด · "
+            f"{len(text)} ตัวอักษร"
+        )
+
+        if text != raw:
+            with st.popover("ดูตัวอย่างที่ render แล้ว"):
+                st.markdown(text)
 
 
 def text_stats(lines: list[str]) -> dict:

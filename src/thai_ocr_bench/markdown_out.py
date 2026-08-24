@@ -42,6 +42,33 @@ def path_for(doc_name: str, engine: str) -> Path:
     return EXPORT_DIR / f"{_safe(doc_name)} · {_safe(engine)}.md"
 
 
+def page_path_for(page_id: str, engine: str) -> Path:
+    return EXPORT_DIR / "pages" / f"{_safe(page_id)} · {_safe(engine)}.md"
+
+
+def save_page(page_id: str, engine: str, text: str) -> Path:
+    """เก็บฉบับที่คนแก้ของ "หน้าเดียว" — ใช้ตอนแก้จากแท็บเปรียบเทียบ
+
+    แยกไฟล์รายหน้าแทนที่จะไปแก้กลางไฟล์รวมของทั้งเอกสาร เพราะการหาตำแหน่ง
+    ของหน้านั้นในไฟล์รวมแล้วเขียนทับเฉพาะช่วง ต้องแยกไฟล์กลับเป็นหน้า ๆ ก่อน
+    ซึ่งพังทันทีถ้าคนเผลอแก้เครื่องหมายคั่นหน้า — เสี่ยงกินงานทั้งเอกสาร
+    ไฟล์รายหน้าแยกกันอยู่แล้ว จะพังก็พังแค่หน้าเดียว
+    """
+    path = page_path_for(page_id, engine)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def load_page(page_id: str, engine: str) -> str | None:
+    path = page_path_for(page_id, engine)
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def clear_page(page_id: str, engine: str) -> None:
+    page_path_for(page_id, engine).unlink(missing_ok=True)
+
+
 def build(doc_name: str, engine: str, pages: list[tuple[int, str, list[str]]]) -> str:
     """ประกอบ markdown จากผลดิบ
 
@@ -51,20 +78,31 @@ def build(doc_name: str, engine: str, pages: list[tuple[int, str, list[str]]]) -
     ถ้ามันมี markdown มาอยู่แล้ว (Typhoon) ก็ติดไปด้วย ถ้าไม่มีก็เป็นข้อความเปล่า
     หน้าที่นี่คือ "ห่อ" ไม่ใช่ "แปลง" — การไปเดาว่าบรรทัดไหนควรเป็นหัวข้อ
     คือการเดาแทน engine ซึ่งเป็นคนละเรื่องกับการวัดว่า engine อ่านได้แค่ไหน
+
+    หน้าไหนที่คนแก้ไว้แล้วจากแท็บเปรียบเทียบ จะใช้ฉบับที่แก้แทนผลดิบ
+    ไม่งั้นกดส่งออกทีเดียวงานที่แก้มาทีละหน้าหายหมด
     """
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    out = [
+    edited = 0
+    body: list[str] = []
+    for no, page_id, lines in pages:
+        body += ["---", "", _PAGE_MARK.format(no=no, page_id=page_id), ""]
+        if (fixed := load_page(page_id, engine)) is not None:
+            edited += 1
+            body += fixed.rstrip("\n").splitlines() or ["*(ไม่มีข้อความ)*"]
+        else:
+            body += lines if lines else ["*(ไม่มีข้อความ)*"]
+        body.append("")
+
+    note = f" · แก้ด้วยมือแล้ว {edited} หน้า" if edited else ""
+    head = [
         f"# {doc_name}",
         "",
-        f"> อ่านด้วย `{engine}` · {len(pages)} หน้า · สร้างเมื่อ {stamp}  ",
+        f"> อ่านด้วย `{engine}` · {len(pages)} หน้า{note} · สร้างเมื่อ {stamp}  ",
         "> แก้ตรงนี้ได้เลย กดบันทึกแล้วไฟล์นี้จะถูกเขียนทับด้วยฉบับที่แก้",
         "",
     ]
-    for no, page_id, lines in pages:
-        out += ["---", "", _PAGE_MARK.format(no=no, page_id=page_id), ""]
-        out += lines if lines else ["*(ไม่มีข้อความ)*"]
-        out.append("")
-    return "\n".join(out).rstrip() + "\n"
+    return "\n".join(head + body).rstrip() + "\n"
 
 
 def save(doc_name: str, engine: str, text: str) -> Path:

@@ -35,6 +35,45 @@ class TestBuild:
         assert "<!-- หน้า 1 · p1 -->" in md
 
 
+class TestPageEdits:
+    """แก้ทีละหน้าจากแท็บเปรียบเทียบ แล้วต้องไม่หายตอนส่งออกทั้งเอกสาร"""
+
+    def test_edited_page_replaces_raw_in_the_document_export(
+        self, tmp_path, monkeypatch
+    ):
+        """โจทย์หลัก — ถ้า build() ไม่หยิบของที่แก้ไว้ งานที่แก้ทีละหน้าหายหมด"""
+        monkeypatch.setattr(markdown_out, "EXPORT_DIR", tmp_path)
+        markdown_out.save_page("doc1_p001", "e", "## แก้แล้ว\nบรรทัดที่แก้")
+        md = markdown_out.build("เอกสาร", "e", PAGES)
+        assert "## แก้แล้ว" in md
+        assert "## กรมทะเบียนที่ดิน" not in md  # ผลดิบของหน้านั้นต้องถูกแทนที่
+        assert "มาตรา ๙  ภายใต้บังคับกฎหมาย" in md  # หน้าที่ไม่ได้แก้ยังใช้ผลดิบ
+
+    def test_header_counts_how_many_pages_were_edited(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(markdown_out, "EXPORT_DIR", tmp_path)
+        markdown_out.save_page("doc1_p001", "e", "แก้แล้ว")
+        assert "แก้ด้วยมือแล้ว 1 หน้า" in markdown_out.build("เอกสาร", "e", PAGES)
+
+    def test_edits_are_kept_per_engine(self, tmp_path, monkeypatch):
+        """แก้บนฐานของ engine ไหน ต้องผูกกับตัวนั้น ไม่ปนกับตัวอื่น"""
+        monkeypatch.setattr(markdown_out, "EXPORT_DIR", tmp_path)
+        markdown_out.save_page("doc1_p001", "engine-a", "ของ a")
+        assert markdown_out.load_page("doc1_p001", "engine-b") is None
+
+    def test_clear_page_falls_back_to_raw(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(markdown_out, "EXPORT_DIR", tmp_path)
+        markdown_out.save_page("doc1_p001", "e", "แก้แล้ว")
+        markdown_out.clear_page("doc1_p001", "e")
+        assert markdown_out.load_page("doc1_p001", "e") is None
+        assert "## กรมทะเบียนที่ดิน" in markdown_out.build("เอกสาร", "e", PAGES)
+
+    def test_clearing_a_page_that_was_never_edited_is_not_an_error(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(markdown_out, "EXPORT_DIR", tmp_path)
+        markdown_out.clear_page("ไม่เคยแก้", "e")  # ต้องไม่โยน exception
+
+
 class TestSaveLoad:
     def test_saved_version_wins_over_rebuilding(self, tmp_path, monkeypatch):
         """โจทย์หลักของโมดูลนี้ — ของที่คนแก้แล้วต้องไม่ถูกผลดิบทับ"""
