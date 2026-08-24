@@ -20,9 +20,20 @@ uv pip install -e .
 ## ใช้งาน
 
 ```powershell
-.venv\Scripts\python.exe render_pages.py     # PDF -> PNG 300 DPI (เคารพ /Rotate)
-.venv\Scripts\python.exe build_truth.py      # ดึงเฉลยจาก text layer
-.venv\Scripts\python.exe smoke.py <page_id>  # ทดสอบ engine หน้าเดียว
+.venv\Scripts\python.exe render_pages.py      # PDF -> PNG 300 DPI (เคารพ /Rotate)
+.venv\Scripts\python.exe build_truth.py       # ดึงเฉลยจาก text layer
+.venv\Scripts\python.exe clean_images.py      # ลบลายน้ำ เก็บที่ data/cleaned/
+.venv\Scripts\python.exe run_bench.py         # รัน OCR ทุกตัว เก็บผลลงดิสก์
+.venv\Scripts\streamlit.exe run app.py        # หน้าเว็บดูผล
+```
+
+สคริปต์เสริม
+
+```powershell
+.venv\Scripts\python.exe smoke.py <page_id>   # ทดสอบ engine หน้าเดียวก่อนรันเต็ม
+.venv\Scripts\python.exe compare_engines.py   # ความแม่นแยกตามชนิดอักขระ + คู่ที่สับสน
+.venv\Scripts\python.exe rescue.py --engine <engine>   # ครอปจุดน่าสงสัยแล้วอ่านซ้ำแบบซูม
+.venv\Scripts\python.exe check_rescue.py      # ตัดสินว่าการอ่านซ้ำช่วยจริงไหม
 ```
 
 ## โครงสร้าง
@@ -34,7 +45,11 @@ uv pip install -e .
 | `src/thai_ocr_bench/render.py` | แปลง PDF เป็นภาพ พร้อมจัดการ `/Rotate` |
 | `src/thai_ocr_bench/truth.py` | เฉลย — ดึงจาก text layer หรือคนพิมพ์เอง |
 | `src/thai_ocr_bench/versions.py` | บันทึกเวอร์ชันติดไปกับผล |
+| `src/thai_ocr_bench/suspect.py` | หาจุดที่น่าจะอ่านผิดโดยไม่ต้องมีเฉลย |
+| `src/thai_ocr_bench/markdown_out.py` | ส่งผลออกเป็น markdown ที่คนแก้ต่อได้ |
 | `src/thai_ocr_bench/engines/` | หนึ่งไฟล์ = หนึ่ง OCR |
+| `src/thai_ocr_bench/ui/` | หน้าเว็บ หนึ่งไฟล์ = หนึ่งแท็บ |
+| `experiments/` | สคริปต์ทดลองครั้งเดียวจบ เก็บไว้เป็นหลักฐานว่าเคยวัดอะไรไปแล้ว |
 
 ## OCR ที่เทียบ
 
@@ -43,9 +58,11 @@ uv pip install -e .
 | `tesseract-tha` | Tesseract 5.4 + `tha` (tessdata_best) | เส้นฐานคลาสสิก รันบน CPU |
 | `paddle-th` | `th_PP-OCRv5_mobile_rec` | dict มีเลขไทยครบ ๐–๙ |
 | `easyocr-th` | `thai_g1` | **ตัวคุม** — charset ไม่มี `๐` |
-| `surya` | Surya OCR | มี layout analysis |
-| `typhoon-2b` | `typhoon-ai/typhoon-ocr1.5-2b` | VLM · ย่อภาพเหลือ 1536 px เพราะ VRAM 6 GB |
+| `surya` | Surya OCR | ยังใช้ไม่ได้ — ชนกับ transformers 5.x ที่ Typhoon ต้องใช้ |
+| `typhoon-2b` | `typhoon-ai/typhoon-ocr1.5-2b` | VLM รันในเครื่อง · ย่อภาพเหลือ 1536 px เพราะ VRAM 6 GB |
+| `typhoon-api` | `typhoon-ocr` ผ่าน opentyphoon.ai | รุ่น 2B ตัวเดียวกับข้างบน แต่ไม่กิน VRAM · ส่งเอกสารออกนอกเครื่อง |
 | `thai-trocr` | `kkatiz/thai-trocr-thaigov-v2` | เทรนบน ThaiGov V2 Corpus · ต้องยืมตัวตรวจจับของ Paddle |
+| `thai-trocr-openthaigpt` | `openthaigpt/thai-trocr` | 0.1B (ViT + Electra) · checkpoint คนละตัวบนสถาปัตยกรรมเดียวกัน |
 
 เพิ่ม OCR ใหม่: สร้างไฟล์ในโฟลเดอร์ `engines/` สืบทอด `Engine` แล้วเรียก `register()`
 ตัววัดผลกับหน้าเว็บไม่ต้องแก้
