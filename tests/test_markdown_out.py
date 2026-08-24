@@ -1,8 +1,8 @@
 """เทสต์การส่งออก markdown — ความเสี่ยงคือ "กินงานที่คนแก้ไปแล้ว"
 
 ไฟล์นี้เป็นทางเดียวที่งานแก้ด้วยมือของผู้ใช้ถูกเก็บไว้ ถ้า build() ไปทับ
-ของที่บันทึกแล้ว หรือ split_pages() คืนหน้าผิด งานที่นั่งแก้มาทั้งวันหายทันที
-เทสต์จึงเน้นสองเรื่อง: ต้องไม่แปลงสิ่งที่ engine อ่านมา และต้องวนกลับได้ครบ
+ของที่บันทึกแล้ว งานที่นั่งแก้มาทั้งวันหายทันที
+เทสต์จึงเน้นสองเรื่อง: ต้องไม่แปลงสิ่งที่ engine อ่านมา และของที่แก้แล้วต้องไม่ถูกทับ
 """
 
 from __future__ import annotations
@@ -33,34 +33,6 @@ class TestBuild:
         md = markdown_out.build("เอกสาร", "e", [(1, "p1", [])])
         assert "*(ไม่มีข้อความ)*" in md
         assert "<!-- หน้า 1 · p1 -->" in md
-
-
-class TestSplitPages:
-    def test_round_trips_every_page(self):
-        md = markdown_out.build("เอกสาร", "e", PAGES)
-        assert markdown_out.split_pages(md) == {
-            "doc1_p001": ["## กรมทะเบียนที่ดิน", "วันที่ ๒๐ เมษายน"],
-            "doc1_p002": ["มาตรา ๙  ภายใต้บังคับกฎหมาย"],
-        }
-
-    def test_survives_hand_editing(self):
-        """คนแก้แล้วต้องยังแยกหน้าได้ — นี่คือกรณีใช้งานหลักของฟังก์ชันนี้"""
-        md = markdown_out.build("เอกสาร", "e", PAGES)
-        edited = md.replace("วันที่ ๒๐ เมษายน", "วันที่ ๒๑ เมษายน\nเพิ่มบรรทัดใหม่")
-        out = markdown_out.split_pages(edited)
-        assert out["doc1_p001"] == [
-            "## กรมทะเบียนที่ดิน",
-            "วันที่ ๒๑ เมษายน",
-            "เพิ่มบรรทัดใหม่",
-        ]
-
-    def test_header_block_is_not_mistaken_for_content(self):
-        """หัวเรื่องกับคำอธิบายด้านบนไม่ใช่เนื้อหาของหน้าไหน ต้องไม่ติดมา"""
-        md = markdown_out.build("เอกสาร", "e", PAGES)
-        assert not any(
-            "อ่านด้วย" in ln for lines in markdown_out.split_pages(md).values()
-            for ln in lines
-        )
 
 
 class TestSaveLoad:

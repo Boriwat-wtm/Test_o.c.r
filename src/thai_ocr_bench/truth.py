@@ -90,48 +90,6 @@ def find_repeating_lines(pages: dict[str, list[str]], threshold: float = 0.8) ->
     return {line for line, n in counter.items() if n >= limit}
 
 
-# ตัวยกมีฟอนต์เล็กกว่าตัวปกติในบรรทัดเดียวกันอย่างชัดเจน
-# วัดจากเอกสารจริง: ตัวปกติ 15.96 ตัวยก 10.56 = 0.66 เท่า
-SUPERSCRIPT_SIZE_RATIO = 0.80
-# และ baseline ลอยสูงกว่า (ค่า y น้อยกว่า เพราะแกน y ของ PDF นับลงล่าง)
-SUPERSCRIPT_RISE_PT = 1.5
-
-
-def page_lines_without_superscripts(page) -> list[str]:
-    """ข้อความรายบรรทัดโดยตัดตัวยกออก
-
-    ทำไมต้องตัด — เลขเชิงอรรถในกฎหมายไทยเป็นตัวยกต่อท้ายเลขมาตรา
-    get_text("text") คืนมาเป็นข้อความไหลเดียวกัน "มาตรา ๑๔" + ตัวยก "๑๓"
-    จึงกลายเป็น "มาตรา ๑๔๑๓" ซึ่งไม่มีอยู่จริงในเอกสาร
-    เมื่อเอาไปเป็นเฉลย engine ที่อ่านถูกจะถูกนับว่าผิดทุกครั้งที่เจอเลขมาตรา
-    (พบกับประมวลกฎหมายที่ดิน 54 หน้า มีจุดแบบนี้หลายสิบจุด)
-
-    แยกออกได้แน่นอนเพราะ PDF เก็บตัวยกเป็น span ต่างหากที่ฟอนต์เล็กกว่า
-    และ baseline สูงกว่า จึงไม่ต้องเดาว่าเลขไหนเป็นเลขมาตราเลขไหนเป็นเชิงอรรถ
-    """
-    out: list[str] = []
-    for block in page.get_text("dict").get("blocks", []):
-        for line in block.get("lines", []):
-            spans = line.get("spans", [])
-            if not spans:
-                continue
-            # เทียบกับขนาดที่ใหญ่ที่สุดในบรรทัด ซึ่งคือขนาดของเนื้อความ
-            body = max(s["size"] for s in spans)
-            base = max(s["origin"][1] for s in spans)
-            kept = [
-                s["text"]
-                for s in spans
-                if not (
-                    s["size"] < body * SUPERSCRIPT_SIZE_RATIO
-                    and base - s["origin"][1] > SUPERSCRIPT_RISE_PT
-                )
-            ]
-            text = "".join(kept).strip()
-            if text:
-                out.append(text)
-    return out
-
-
 # อักขระ ASCII ที่แทรกอยู่กลางคำไทย = ฟอนต์ใน PDF แมปผิด
 # ข้อความไทยที่ถูกต้องไม่มีทางมี = < > * @ ^ ~ ` | หรือเลขอารบิก คั่นกลางสองพยัญชนะ
 _BROKEN_GLYPH = re.compile(r"[ก-๛][=<>*@^~`|0-9][ก-๛]")
@@ -173,8 +131,13 @@ def extract_text_layer(
     # ทำให้สองฝั่งใช้กติกาคนละแบบ วัดแล้ว CER ของ Typhoon แย่ลงจาก 0.08%
     # เป็น 0.252% ทั้งที่ไม่มีอะไรในตัว engine เปลี่ยน
     #
-    # ถ้าต้องการเลขมาตราที่แยกจากเชิงอรรถ (เช่นตัวตรวจลำดับมาตรา)
-    # ให้ใช้ page_lines_without_superscripts() แยกต่างหาก อย่าเปลี่ยนเฉลย
+    # เคยมีฟังก์ชันตัดตัวยกจาก span ของ PDF (ขนาดฟอนต์เล็กกว่า 0.80 เท่าและ
+    # baseline ลอยสูงกว่า 1.5pt) ลบทิ้งแล้วเพราะไม่มีใครเรียก และการเอากลับ
+    # มาใช้กับเฉลยคือความผิดพลาดเดิม
+    #
+    # ถ้าต้องการจับเลขมาตราที่มีเชิงอรรถติดมา ให้ทำฝั่งตรวจผล OCR แทน —
+    # suspect.section_length_outliers() ทำอยู่แล้วโดยดูว่าเลขยาวผิดปกติเทียบ
+    # กับเลขมาตราอื่นในเอกสารเดียวกัน ไม่ต้องแตะเฉลยเลย
     with pymupdf.open(pdf_path) as doc:
         for idx, page in enumerate(doc, start=1):
             raw_pages[f"{doc_id}_p{idx:03d}"] = _clean_lines(page.get_text("text"))

@@ -264,22 +264,6 @@ class Suspect:
         return {f.layer for f in self.findings}
 
 
-def merge_boxes(boxes: list[Box]) -> Box | None:
-    """รวมกล่องหลายใบเป็นใบเดียวที่ครอบทุกใบ
-
-    เอา engine หลายตัวมาช่วยกันชี้ตำแหน่ง แล้วเอากรอบที่ครอบทั้งหมด
-    เพราะแต่ละตัวตีกรอบไม่เท่ากัน ครอบเผื่อไว้ปลอดภัยกว่าครอปขาด
-    """
-    boxes = [b for b in boxes if b]
-    if not boxes:
-        return None
-    x = min(b[0] for b in boxes)
-    y = min(b[1] for b in boxes)
-    x2 = max(b[0] + b[2] for b in boxes)
-    y2 = max(b[1] + b[3] for b in boxes)
-    return (x, y, x2 - x, y2 - y)
-
-
 def find_in_line(
     line: str,
     peers: list[str],

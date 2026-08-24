@@ -24,10 +24,9 @@ from .config import ROOT
 EXPORT_DIR = ROOT / "exports"
 
 # คั่นหน้าด้วย comment ของ markdown เพราะมองไม่เห็นตอน render เป็นเอกสารจริง
-# แต่ยังอยู่ในไฟล์ให้เราหาหน้ากลับได้ ใช้ heading (##) ไม่ได้เพราะชนกับ
+# แต่ยังอยู่ในไฟล์ให้คนหาหน้าเจอตอนแก้ ใช้ heading (##) ไม่ได้เพราะชนกับ
 # หัวข้อที่ Typhoon อ่านมาจากตัวเอกสารเอง ซึ่งก็เป็น ## เหมือนกัน
 _PAGE_MARK = "<!-- หน้า {no} · {page_id} -->"
-_PAGE_RE = re.compile(r"<!--\s*หน้า\s*(\d+)\s*·\s*(\S+)\s*-->")
 
 
 def _safe(name: str) -> str:
@@ -79,25 +78,3 @@ def load(doc_name: str, engine: str) -> str | None:
     """คืนฉบับที่คนแก้แล้ว ถ้ายังไม่เคยบันทึกคืน None ให้ผู้เรียกไปสร้างใหม่เอง"""
     path = path_for(doc_name, engine)
     return path.read_text(encoding="utf-8") if path.exists() else None
-
-
-def split_pages(text: str) -> dict[str, list[str]]:
-    """แยก markdown ที่คนแก้แล้วกลับเป็นรายหน้า ตามเครื่องหมายคั่นที่ build() ใส่ไว้
-
-    มีไว้ให้เอาสิ่งที่คนแก้แล้วไปใช้ต่อได้ เช่น ยกเป็นเฉลย เพราะการแก้ทีละหน้า
-    ในเว็บช้ากว่าแก้ทั้งเอกสารรวดเดียวในโปรแกรมแก้ข้อความที่ถนัด
-
-    บรรทัดที่เป็นโครงของไฟล์เอง (หัวเรื่อง คำอธิบาย เส้นคั่น) ถูกตัดออก
-    เหลือแต่เนื้อหาจริงของแต่ละหน้า
-    """
-    out: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in text.splitlines():
-        if m := _PAGE_RE.search(line):
-            current = m.group(2)
-            out[current] = []
-            continue
-        if current is None or line.strip() in {"---", ""}:
-            continue
-        out[current].append(line.rstrip())
-    return {pid: [ln for ln in lines if ln.strip()] for pid, lines in out.items()}

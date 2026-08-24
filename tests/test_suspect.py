@@ -11,7 +11,6 @@ from thai_ocr_bench.suspect import (
     build_grid,
     cross_engine_findings,
     find_in_line,
-    merge_boxes,
     pick_grid,
     rule_findings,
     scan_page,
@@ -159,15 +158,6 @@ class TestFindInLine:
         mine = "มาตรา ๙  ภายใต้บังคับ"
         peers = ["มาตรา๙ภายใต้บังคับ", "มาตรา ๙ ภายใต้บังคับ"]
         assert [f for f in find_in_line(mine, peers, thai_doc=True) if f.layer == "vote"] == []
-
-
-class TestMergeBoxes:
-    def test_covers_every_box(self):
-        assert merge_boxes([(10, 20, 30, 40), (50, 10, 20, 20)]) == (10, 10, 60, 50)
-
-    def test_empty_returns_none(self):
-        assert merge_boxes([]) is None
-        assert merge_boxes([None]) is None  # type: ignore[list-item]
 
 
 class TestGrid:
