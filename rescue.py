@@ -134,8 +134,8 @@ def main() -> None:
         type=int,
         default=1,
         help="อ่านซ้ำกี่รอบแบบสุ่มต่อจุด เพื่อดู self-consistency "
-        "(ใช้ได้เฉพาะ engine ที่มี read_variants() เช่น typhoon-2b — "
-        "ตัวอื่นไม่รองรับเพราะควบคุมการสุ่มไม่ได้)",
+        "(ใช้ได้กับตระกูล typhoon ทั้ง local และ API — ตัวอื่นไม่รองรับ "
+        "เพราะควบคุมการสุ่มไม่ได้ · ฝั่ง API กินโควตา N เท่า)",
     )
     args = parser.parse_args()
 
@@ -162,8 +162,9 @@ def main() -> None:
     img_dir = CLEAN_IMAGE_DIR if engine_variant(args.engine) == "clean" else IMAGE_DIR
     print(f"อ่านซ้ำ {len(suspects)} จุด ด้วย {base} (ภาพจาก {img_dir.name}/)\n")
 
-    # read_variants() มีเฉพาะ engine ที่ควบคุมการสุ่มได้ (typhoon-2b ที่รันในเครื่อง)
-    # engine อื่นอ่านรอบเดียวเสมอไม่ว่าเรียกกี่ครั้ง ขอ --samples ไปก็ไม่มีความหมาย
+    # read_variants() มีเฉพาะตระกูล typhoon (ทั้ง typhoon-2b ในเครื่องและฝั่ง API)
+    # ซึ่งควบคุมค่า sampling ตอนสร้างคำตอบได้ engine อื่นอ่านรอบเดียวเสมอ
+    # ไม่ว่าเรียกกี่ครั้ง ขอ --samples ไปก็ไม่มีความหมาย
     use_variants = args.samples > 1 and hasattr(engine, "read_variants")
     if args.samples > 1 and not use_variants:
         print(f"หมายเหตุ: {base} ไม่รองรับการอ่านซ้ำแบบสุ่ม ข้าม --samples ไปอ่านรอบเดียว\n")

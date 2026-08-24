@@ -34,6 +34,11 @@ MIN_INTERVAL_SECONDS = 3.1
 # ไม่ต้องย่อภาพลงมากเท่ารุ่นที่รันในเครื่อง เพราะไม่ติดข้อจำกัด VRAM
 TARGET_IMAGE_DIM = 1800
 
+# ค่าเดียวกับที่ SDK ใช้ตอนเรียก ocr_document() — read_variants() ต้องเรียก API
+# เองจึงต้องประกาศซ้ำตรงนี้ ถ้าค่าสองที่ไม่ตรงกันจะเทียบผลกันไม่ได้
+API_BASE_URL = "https://api.opentyphoon.ai/v1"
+MAX_TOKENS = 16384
+
 _throttle = threading.Lock()
 _last_call = 0.0
 
@@ -66,6 +71,74 @@ class TyphoonApi(Engine):
         ):
             return False, "ยังไม่ได้ตั้งตัวแปรแวดล้อม TYPHOON_OCR_API_KEY"
         return True, ""
+
+    def _client(self):
+        from openai import OpenAI
+
+        return OpenAI(
+            base_url=os.getenv("TYPHOON_BASE_URL", API_BASE_URL),
+            api_key=os.getenv("TYPHOON_OCR_API_KEY") or os.getenv("TYPHOON_API_KEY"),
+        )
+
+    def _messages(self, image_path: Path) -> list:
+        """ประกอบคำสั่งที่จะส่งให้ API — คลาสลูกแทรกคำกำชับเพิ่มได้ที่นี่
+
+        แยกออกมาเพื่อให้ read_variants() ใช้ร่วมกับคลาสลูกได้ ถ้าประกอบ
+        คำสั่งซ้ำในแต่ละเมธอด คลาสลูกจะได้คำสั่งคนละชุดกับตอน _run()
+        แล้วผลอ่านซ้ำจะเทียบกับผลปกติไม่ได้
+        """
+        from typhoon_ocr.ocr_utils import prepare_ocr_messages
+
+        return prepare_ocr_messages(
+            pdf_or_image_path=str(image_path),
+            task_type=self.task_type,
+            target_image_dim=TARGET_IMAGE_DIM,
+        )
+
+    def read_variants(
+        self, image_path: Path, *, n: int = 3, temperature: float = 0.9
+    ) -> list[str]:
+        """อ่านภาพเดิมซ้ำ n รอบแบบสุ่ม คืนข้อความทุกรอบ — ใช้ดู self-consistency
+
+        ต้องเรียก API เองแทน ocr_document() เพราะ SDK ตรึง temperature=0.1
+        กับ top_p=0.6 ไว้ตายตัวในตัวมัน (ocr_utils.py) ส่งค่าอื่นเข้าไปไม่ได้
+        ซึ่งเกือบเป็น greedy จนอ่านซ้ำกี่รอบก็ได้คำตอบเดิม ใช้เช็กความมั่นใจไม่ได้
+
+        ทำไมฝั่ง API ทำได้แค่วิธีนี้ วิธีเดียว
+            confidence ระดับ token ทำไม่ได้ — ทดสอบแล้วเซิร์ฟเวอร์รับ
+            logprobs=True ไปแบบไม่ error แต่คืน logprobs เป็น None เสมอ
+            (ต่างจาก typhoon-2b ที่รันเองในเครื่องจึงอ่านค่าตอน generate ได้)
+
+        กินโควตา n เท่าของการอ่านปกติ โควตาคือ 20 ครั้ง/นาที จึงควรใช้กับ
+        ภาพครอปทีละบรรทัด (แบบ rescue.py) ไม่ใช่ทั้งหน้า
+        """
+        client = self._client()
+        messages = self._messages(image_path)
+
+        out: list[str] = []
+        for _ in range(n):
+            _wait_turn()
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=MAX_TOKENS,
+                extra_body={
+                    "repetition_penalty": 1.1,
+                    "temperature": temperature,
+                    "top_p": 0.95,
+                },
+            )
+            text = (response.choices[0].message.content or "").strip()
+            # ถอด markdown เหมือน _run() ไม่งั้นเทียบกันแล้วต่างเพราะสัญลักษณ์
+            # จัดรูปแบบ ไม่ใช่เพราะอ่านได้ไม่เหมือนกันจริง
+            cleaned = "\n".join(
+                stripped
+                for raw in text.splitlines()
+                if (stripped := _strip_markdown(raw))
+            )
+            if cleaned:
+                out.append(cleaned)
+        return out
 
     def _run(self, image_path: Path) -> tuple[list[OcrLine], float]:
         from typhoon_ocr import ocr_document
@@ -129,7 +202,7 @@ def _strip_markdown(line: str) -> str:
     return text.strip()
 
 
-class TyphoonApiThaiNum(Engine):
+class TyphoonApiThaiNum(TyphoonApi):
     """Typhoon ตัวเดิม แต่กำชับเรื่องเลขไทยเพิ่มในคำสั่ง
 
     ที่มา: วัดผลชุด ๑๒ หน้าแล้วพบว่าความผิดที่เหลือของ Typhoon เกือบทั้งหมด
@@ -146,10 +219,6 @@ class TyphoonApiThaiNum(Engine):
 
     name = "typhoon-api-num"
     label = "Typhoon OCR (API + กำชับเลขไทย)"
-    needs_gpu = False
-
-    model = TyphoonApi.model
-    task_type = TyphoonApi.task_type
 
     HINT = (
         "\n- Thai numerals: Keep Thai digits (๐๑๒๓๔๕๖๗๘๙) exactly as they appear. "
@@ -158,28 +227,23 @@ class TyphoonApiThaiNum(Engine):
         "if the mark in the image is a Thai digit, output a Thai digit."
     )
 
-    def available(self) -> tuple[bool, str]:
-        return TyphoonApi().available()
+    def _messages(self, image_path: Path) -> list:
+        """คำสั่งชุดเดียวกับตัวแม่ แต่ต่อคำกำชับเลขไทยท้ายกฎการจัดรูปแบบ
 
-    def _run(self, image_path: Path) -> tuple[list[OcrLine], float]:
-        from openai import OpenAI
-        from typhoon_ocr.ocr_utils import prepare_ocr_messages
-
-        messages = prepare_ocr_messages(
-            pdf_or_image_path=str(image_path),
-            task_type=self.task_type,
-            target_image_dim=TARGET_IMAGE_DIM,
-        )
-        # ต่อคำกำชับท้ายกฎการจัดรูปแบบเดิม ไม่ทับของเดิมทิ้ง
+        อยู่ตรงนี้ที่เดียว ทั้ง _run() และ read_variants() จึงได้คำกำชับ
+        เหมือนกัน ผลอ่านซ้ำแบบสุ่มจึงเทียบกับผลปกติได้จริง
+        """
+        messages = super()._messages(image_path)
+        # ต่อท้ายของเดิม ไม่ทับทิ้ง
         for part in messages[-1]["content"]:
             if part.get("type") == "text":
                 part["text"] = part["text"].rstrip() + self.HINT
                 break
+        return messages
 
-        client = OpenAI(
-            base_url=os.getenv("TYPHOON_BASE_URL", "https://api.opentyphoon.ai/v1"),
-            api_key=os.getenv("TYPHOON_OCR_API_KEY") or os.getenv("TYPHOON_API_KEY"),
-        )
+    def _run(self, image_path: Path) -> tuple[list[OcrLine], float]:
+        messages = self._messages(image_path)
+        client = self._client()
         _wait_turn()
         started = time.perf_counter()
         response = client.chat.completions.create(

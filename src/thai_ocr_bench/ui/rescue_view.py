@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from pathlib import Path
 
 import streamlit as st
 
 from .. import history
-from ..config import IMAGE_DIR, RESULTS_DIR
+from ..config import IMAGE_DIR, RESULTS_DIR, ROOT
 from ..render import PageInfo
 from .common import _crop, page_label
 
@@ -20,7 +19,7 @@ def start_rescue(engine: str, limit: int | None) -> None:
     ต้องแยกโปรเซสเพราะการอ่านซ้ำยิง API ทีละจุดโดยมี throttle 3.1 วินาที
     ถ้ารันในโปรเซสของหน้าเว็บจะบล็อกจนหน้าหมุนค้างเป็นนาที
     """
-    cmd = [sys.executable, str(Path(__file__).parent / "rescue.py"), "--engine", engine]
+    cmd = [sys.executable, str(ROOT / "rescue.py"), "--engine", engine]
     if limit:
         cmd += ["--limit", str(limit)]
 
@@ -30,7 +29,7 @@ def start_rescue(engine: str, limit: int | None) -> None:
     handle.write(f"\n{'=' * 70}\nเริ่มอ่านซ้ำ {history.now_iso()} · engine {engine}\n")
     handle.flush()
     subprocess.Popen(
-        cmd, stdout=handle, stderr=subprocess.STDOUT, cwd=log.parent.parent,
+        cmd, stdout=handle, stderr=subprocess.STDOUT, cwd=ROOT,
         creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
     )
 
@@ -105,8 +104,9 @@ def view_rescue(pages: list[PageInfo], results: dict) -> None:
     if not has_variants:
         st.caption(
             "อยากรู้ว่าจุดไหน engine เองก็ไม่มั่นใจ ให้รันด้วย "
-            "`rescue.py --engine typhoon-2b --samples 3` — จะอ่านซ้ำหลายรอบแบบสุ่ม "
-            "แล้วเทียบว่าตอบตรงกันไหม (ใช้ได้เฉพาะ engine ที่รันในเครื่อง)"
+            "`rescue.py --engine <engine> --samples 3` — จะอ่านซ้ำหลายรอบแบบสุ่ม "
+            "แล้วเทียบว่าตอบตรงกันไหม ใช้ได้กับตระกูล typhoon ทั้ง local และ API "
+            "(ฝั่ง API กินโควตา ๓ เท่า)"
         )
 
     if not shown:

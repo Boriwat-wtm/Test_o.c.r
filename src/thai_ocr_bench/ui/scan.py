@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
 import streamlit as st
 
 from collections import Counter
 
 from .. import history, progress, store
-from ..config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR, SOURCE_DIR
+from ..config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR, ROOT, SOURCE_DIR
 from ..engines.base import get_engines
 from ..preprocess import clean_file
 from ..render import PageInfo, load_pages, render_all
@@ -43,7 +42,7 @@ def start_scan(engines: list[str], docs: list[str], *, clean: bool, redo: bool) 
         st.warning("มีตัวรันทำงานอยู่แล้ว ไม่สั่งซ้ำ")
         return
 
-    cmd = [sys.executable, str(Path(__file__).parent / "run_bench.py")]
+    cmd = [sys.executable, str(ROOT / "run_bench.py")]
     for name in engines:
         cmd += ["-e", name]
     for name in docs:
@@ -70,7 +69,7 @@ def start_scan(engines: list[str], docs: list[str], *, clean: bool, redo: bool) 
     # DETACHED_PROCESS ไม่ให้ตัวรันตายตาม Streamlit ตอนกด Ctrl+C หรือรีโหลด
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     subprocess.Popen(
-        cmd, stdout=handle, stderr=subprocess.STDOUT, cwd=log.parent.parent,
+        cmd, stdout=handle, stderr=subprocess.STDOUT, cwd=ROOT,
         creationflags=flags,
     )
 
