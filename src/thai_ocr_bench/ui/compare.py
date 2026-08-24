@@ -21,8 +21,10 @@ from ..thai_text import THAI_DIGITS, normalize
 from ..truth import load as load_truth
 from ..viewer import EngineRecord, LineRecord, build_html
 from .common import (
+    _crop,
     cached_image,
     page_label,
+    unstable_points,
     engine_group,
     image_dir_for,
     merges_lines,
@@ -293,6 +295,8 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         st.error(f"ไม่พบไฟล์ภาพ {image_path.name}")
         return
 
+    unstable_banner(picked)
+
     entry = truth.get(picked.page_id)
     truth_lines = entry.lines if entry else []
     if not truth_lines:
@@ -323,6 +327,38 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
 
     edit_panel(picked, chosen, results)
     page_round_history(picked.page_id)
+
+
+def unstable_banner(picked: PageInfo) -> None:
+    """เตือนตรงหัวหน้าว่าบรรทัดไหน engine เองก็ไม่มั่นใจ
+
+    วางไว้เหนือตัวดูภาพเพื่อให้เห็นก่อนเริ่มไล่อ่าน — ถ้าไปอยู่ท้ายหน้า
+    คนจะอ่านผ่านทั้งหน้าไปแล้วค่อยเจอ ซึ่งช้ากว่าที่ควรเป็น
+
+    ข้อมูลมาจาก rescue.py --samples N (อ่านซ้ำหลายรอบแบบสุ่มแล้วตอบไม่ตรงกัน)
+    หน้าที่ยังไม่เคยรันจะไม่ขึ้นอะไรเลย ไม่ใช่ขึ้นว่า "ปลอดภัย" เพราะยังไม่ได้ตรวจ
+    ไม่เท่ากับตรวจแล้วไม่เจอ
+    """
+    points = unstable_points(picked.page_id)
+    if not points:
+        return
+
+    st.warning(
+        f"⚠️ หน้านี้มี {len(points)} จุดที่ engine อ่านซ้ำแล้วตอบไม่ตรงกัน — "
+        "ควรดูภาพจริงตรงจุดพวกนี้ก่อน"
+    )
+    for p in points:
+        with st.expander(f"บรรทัดที่ {p['grid_line'] + 1} · กางดูทุกรอบ"):
+            for j, v in enumerate(p.get("variants") or [], 1):
+                st.code(f"รอบ {j}: {v}")
+            if p.get("box"):
+                uri = _crop(str(IMAGE_DIR / f"{picked.page_id}.png"), tuple(p["box"]))
+                if uri:
+                    st.markdown(
+                        f'<img src="{uri}" style="width:100%;border-radius:.5rem;'
+                        f'border:1px solid var(--border)">',
+                        unsafe_allow_html=True,
+                    )
 
 
 def edit_panel(picked: PageInfo, chosen: list[str], results: dict) -> None:

@@ -15,7 +15,7 @@ from pathlib import Path
 import streamlit as st
 from PIL import Image
 
-from ..config import CLEAN_IMAGE_DIR, IMAGE_DIR
+from ..config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR
 from ..render import PageInfo, load_pages
 from ..truth import find_repeating_lines
 from ..viewer import encode_image
@@ -100,6 +100,39 @@ def drop_watermarks(results: dict) -> dict:
             )
     return cleaned
 
+
+
+@st.cache_data(show_spinner=False)
+def _unstable_points(path: str, mtime: float) -> dict[str, list[dict]]:
+    """จุดที่อ่านซ้ำหลายรอบแล้วตอบไม่ตรงกัน จัดกลุ่มตามหน้า
+
+    ผูกแคชกับ mtime ของไฟล์ เพื่อให้รัน rescue.py รอบใหม่แล้วหน้าเว็บเห็นทันที
+    โดยไม่ต้องรีสตาร์ท (แบบเดียวกับ _cached_image)
+    """
+    import json
+
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+    out: dict[str, list[dict]] = {}
+    for item in data.get("items", []):
+        if item.get("agree") is False:
+            out.setdefault(item["page_id"], []).append(item)
+    return out
+
+
+def unstable_points(page_id: str) -> list[dict]:
+    """จุดที่ engine เองอ่านซ้ำแล้วตอบไม่ตรงกันในหน้านี้ — ว่างถ้ายังไม่เคยรัน
+
+    แยกจาก suspect.py เพราะเป็นสัญญาณคนละชนิด — ตัวนั้นเทียบกับ engine อื่น
+    หรือใช้กฎตายตัว ส่วนตัวนี้คือ engine ตัวเดียวกันตอบไม่เหมือนเดิมเมื่อถามซ้ำ
+    """
+    path = RESULTS_DIR / "rescue.json"
+    if not path.exists():
+        return []
+    return _unstable_points(str(path), path.stat().st_mtime).get(page_id, [])
 
 
 def page_label(p: PageInfo) -> str:
