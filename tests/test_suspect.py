@@ -15,6 +15,7 @@ from thai_ocr_bench.suspect import (
     pick_grid,
     rule_findings,
     scan_page,
+    section_length_outliers,
     thai_digit_document,
 )
 
@@ -55,6 +56,37 @@ class TestRuleLayer:
 
     def test_clean_thai_line_is_silent(self):
         assert rule_findings(THAI_LINES[1], thai_doc=True) == []
+
+
+class TestSectionLengthOutliers:
+    """เช็กตัวเองล้วน ๆ ไม่ต้องมี engine อื่นมาเทียบเลย"""
+
+    PAGE = [
+        "มาตรา ๑๓  ที่ดินของรัฐ",
+        "มาตรา ๑๔๑๓ ให้มีคณะกรรมการ",  # ๑๔ ต่อกับเชิงอรรถ ๑๓ แบบไม่มีช่องว่าง
+        "มาตรา ๑๕  กรรมการผู้ทรงคุณวุฒิ",
+    ]
+
+    def test_flags_the_line_that_grew_extra_digits(self):
+        found = section_length_outliers(self.PAGE)
+        assert list(found) == [1]
+        start, end, guess, why = found[1][0]
+        assert self.PAGE[1][start:end] == "๑๔๑๓"
+        assert guess == "๑๔"
+
+    def test_silent_when_every_section_number_is_the_same_length(self):
+        page = ["มาตรา ๙ ก", "มาตรา ๑๐ ข", "มาตรา ๑๑ ค"]
+        assert section_length_outliers(page) == {}
+
+    def test_too_few_section_numbers_cannot_set_a_baseline(self):
+        """มีมาตราแค่ ๒ ค่า คำนวณฐานนิยมไม่น่าเชื่อถือ ต้องไม่เดา"""
+        page = ["มาตรา ๙ ก", "มาตรา ๑๐๑๑ ข"]
+        assert section_length_outliers(page) == {}
+
+    def test_no_fixed_number_hardcoded_generalises_across_documents(self):
+        """เอกสารที่มีมาตราเกิน ๑๑๓ จริงต้องไม่โดนเตือนผิด ถ้าความยาวสม่ำเสมอ"""
+        page = [f"มาตรา {n} ก" for n in ("๑๒๐", "๑๒๑", "๑๒๒", "๑๒๓")]
+        assert section_length_outliers(page) == {}
 
 
 class TestVoteLayer:

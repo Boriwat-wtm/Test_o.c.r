@@ -87,6 +87,53 @@ def rule_findings(line: str, *, thai_doc: bool) -> list[tuple[int, int, str, str
     return out
 
 
+_SECTION_NUM = re.compile(r"มาตรา\s*([๐-๙]+)")
+
+
+def section_length_outliers(
+    lines: list[str], *, min_samples: int = 3, extra_digits: int = 2
+) -> dict[int, list[tuple[int, int, str, str]]]:
+    """เลขมาตราที่ยาวผิดปกติเทียบกับเลขมาตราอื่นในหน้าเดียวกัน — กฎตายตัวเช่นกัน
+    แต่ต้องดูทั้งหน้าพร้อมกัน ไม่ใช่ทีละบรรทัดแบบ rule_findings จึงแยกมาต่างหาก
+
+    วัดจริงพบว่า Typhoon เอาเลขเชิงอรรถตัวยกมาต่อท้ายเลขมาตราแบบไม่มีช่องว่าง
+        มาตรา ๑๔ + เชิงอรรถ ๑๓  →  "มาตรา ๑๔๑๓"   (พบ ๓๒ จุดในเอกสารทดสอบ)
+    ผลคือค่าถูกทุกตัวแยกกัน แต่ต่อกันแล้วกลายเป็นเลขมาตราที่ไม่มีจริง อ่านเผิน ๆ
+    ดูสมเหตุสมผล (ยังเป็นตัวเลข ยังตามหลังคำว่า "มาตรา") จึงเป็นความผิดแบบเนียน
+    ที่ชั้นกฎในบรรทัดเดียวจับไม่ได้ และโหวตข้ามเครื่องก็จับไม่ได้เช่นกันถ้า
+    engine อื่นอ่านเลขไทยผิดพอ ๆ กันอยู่แล้ว (วัดไว้ก่อนหน้านี้ว่าช่วยได้แค่ 14%)
+
+    ใช้เลขตายตัวเป็นเกณฑ์ไม่ได้ (เช่น "เกิน ๑๑๓") เพราะกฎหมายแต่ละฉบับมีจำนวน
+    มาตราไม่เท่ากัน จะใช้ได้แค่ฉบับเดียว จึงเทียบกับ "ความยาวหลักที่พบบ่อยที่สุด
+    ในหน้านั้นเอง" (ฐานนิยม) แทน — เป็นเกณฑ์ที่ใช้ข้ามเอกสารได้จริง
+
+    ต้องมีเลขมาตราอย่างน้อย min_samples ค่าในหน้า ถึงจะคำนวณฐานนิยมได้น่าเชื่อถือ
+    หน้าที่มีมาตราแค่หนึ่งสองค่าไม่พอตัดสิน ปล่อยผ่านดีกว่าเดามั่ว
+    """
+    hits: list[tuple[int, int, int, str]] = []  # (บรรทัด, เริ่ม, จบ, ตัวเลข)
+    for i, line in enumerate(lines):
+        for m in _SECTION_NUM.finditer(line):
+            hits.append((i, m.start(1), m.end(1), m.group(1)))
+
+    if len(hits) < min_samples:
+        return {}
+
+    mode_len = Counter(len(d) for _, _, _, d in hits).most_common(1)[0][0]
+
+    out: dict[int, list[tuple[int, int, str, str]]] = {}
+    for line_idx, start, end, digits in hits:
+        if len(digits) < mode_len + extra_digits:
+            continue
+        # เดาว่าส่วนท้ายที่เกินมาคือเลขเชิงอรรถที่ต่อเข้ามา ตัดกลับเหลือความยาวปกติ
+        guess = digits[:mode_len]
+        out.setdefault(line_idx, []).append((
+            start, end, guess,
+            f"เลขมาตรายาว {len(digits)} หลัก ทั้งที่ส่วนใหญ่ในหน้านี้ยาว {mode_len} หลัก "
+            "— น่าจะมีเลขเชิงอรรถต่อท้ายมา",
+        ))
+    return out
+
+
 # ── ชั้นที่ ๒ : โหวตข้ามเครื่องระดับตัวอักษร ───────────────────────────
 
 def cross_engine_findings(
@@ -317,13 +364,23 @@ def scan_page(
     if grid_engine is None or engine not in pages:
         return []
 
+    grid = build_grid(pages, grid_engine)
+    # ต้องดูทั้งหน้าของ engine เป้าหมายพร้อมกันครั้งเดียว ไม่ใช่ทีละแถวในลูปข้างล่าง
+    # เพราะฐานนิยมของความยาวเลขมาตราคำนวณได้ก็ต่อเมื่อเห็นทุกบรรทัดพร้อมกัน
+    page_findings = section_length_outliers([row.reads.get(engine, "") for row in grid])
+
     out: list[Suspect] = []
-    for row in build_grid(pages, grid_engine):
+    for row in grid:
         mine = row.reads.get(engine, "")
         if not mine.strip():
             continue
         peers = [t for n, t in row.reads.items() if n != engine and t.strip()]
         findings = find_in_line(mine, peers, thai_doc=thai_doc)
+        findings += [
+            Finding(s, e, mine[s:e], fix, why, "rule")
+            for s, e, fix, why in page_findings.get(row.index, [])
+        ]
+        findings.sort(key=lambda f: (f.start, f.end))
         if findings:
             out.append(
                 Suspect(
