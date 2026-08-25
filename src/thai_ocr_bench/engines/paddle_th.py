@@ -24,6 +24,10 @@ class PaddleThai(Engine):
     label = "PaddleOCR (th_PP-OCRv5)"
     needs_gpu = False
 
+    # แยกชื่อตัวตรวจจับออกมาเป็นค่าของคลาส เพื่อให้สร้างตัวแปรที่ใช้ตัวตรวจจับ
+    # คนละรุ่นได้โดยไม่ต้องคัดลอกโค้ดทั้งก้อน (ดู PaddleThaiServer ท้ายไฟล์)
+    detector = "PP-OCRv5_mobile_det"
+
     def __init__(self) -> None:
         self._ocr: Any = None
 
@@ -53,7 +57,7 @@ class PaddleThai(Engine):
                 # ต้องระบุตัวตรวจจับเอง ไม่งั้น lang='th' จะไปหยิบ PP-OCRv5_server_det
                 # ซึ่งใหญ่กว่ามากและกินเวลา 234 วินาทีต่อหน้าบน CPU
                 # ส่วนตัวอ่านข้อความ th_PP-OCRv5_mobile_rec เป็น mobile อยู่แล้ว
-                text_detection_model_name="PP-OCRv5_mobile_det",
+                text_detection_model_name=self.detector,
                 text_recognition_model_name="th_PP-OCRv5_mobile_rec",
                 enable_mkldnn=False,
                 use_doc_orientation_classify=False,
@@ -117,4 +121,24 @@ def _to_box(poly: Any) -> tuple[int, int, int, int] | None:
     return x0, y0, int(max(xs)) - x0, int(max(ys)) - y0
 
 
+class PaddleThaiServer(PaddleThai):
+    """เหมือน paddle-th ทุกอย่าง เปลี่ยนแค่ตัวตรวจจับบรรทัดเป็นรุ่น server
+
+    มีไว้ตอบคำถามที่ค้างมานาน: paddle-th เลือกใช้ตัวตรวจจับรุ่น mobile ด้วย
+    เหตุผลเรื่องความเร็วอย่างเดียว (234 วินาทีต่อหน้าบน CPU เทียบกับ ~8 วินาที)
+    ไม่เคยมีใครวัดว่ารุ่น server แม่นกว่าหรือเปล่า
+
+    ตัวอ่านข้อความยังเป็น th_PP-OCRv5_mobile_rec ตัวเดียวกัน ผลต่างที่เห็น
+    จึงมาจากตัวตรวจจับล้วน ๆ และคาดว่าจะเห็นชัดที่ "อ่านครบ" กับ "บรรทัดเกิน"
+    มากกว่าที่ CER เพราะ CER วัดเฉพาะบรรทัดที่จับคู่กับเฉลยได้แล้ว
+
+    ช้าเกินกว่าจะรันทั้งคลัง ตั้งใจให้เจาะทีละเอกสารด้วย run_bench.py --doc
+    """
+
+    name = "paddle-th-server"
+    label = "PaddleOCR (ตรวจจับรุ่น server)"
+    detector = "PP-OCRv5_server_det"
+
+
 register(PaddleThai())
+register(PaddleThaiServer())
