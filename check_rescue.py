@@ -18,7 +18,6 @@ import json
 from rapidfuzz.distance import Levenshtein
 
 from thai_ocr_bench.config import RESULTS_DIR
-from thai_ocr_bench.metrics import align_lines
 from thai_ocr_bench.thai_text import normalize
 from thai_ocr_bench.truth import load as load_truth
 

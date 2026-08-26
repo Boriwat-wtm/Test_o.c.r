@@ -156,7 +156,7 @@ def view_summary(pages: list[PageInfo], results: dict) -> None:
 
     st.dataframe(
         rows,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "engine": st.column_config.TextColumn("engine", width="medium"),

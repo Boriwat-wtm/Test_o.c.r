@@ -52,7 +52,7 @@ def view_truth(pages: list[PageInfo], results: dict) -> None:
     if image.exists():
         with left:
             with st.container(border=True):
-                st.image(str(image), use_container_width=True)
+                st.image(str(image), width="stretch")
 
     existing = truth.get(picked.page_id)
     if existing:

@@ -170,7 +170,7 @@ def view_suspects(pages: list[PageInfo], results: dict) -> None:
                 # ภาพครอปซ่อนไว้ใต้ปุ่มกาง ไม่กางเอง — ของเดิมโหลดภาพทุกจุด
                 # พร้อมกันทำให้หน้าอืดและยาวมากเมื่อมีหลายสิบจุด
                 if s.box:
-                    with st.popover("ดูภาพครอป", use_container_width=False):
+                    with st.popover("ดูภาพครอป", width="content"):
                         uri = _crop(str(img_dir / f"{s.page_id}.png"), s.box)
                         if uri:
                             st.markdown(

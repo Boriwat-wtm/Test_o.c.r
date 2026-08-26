@@ -17,7 +17,7 @@ from PIL import Image
 
 from ..config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR
 from ..render import PageInfo, load_pages
-from ..rescue_crop import ZOOM, crop_region
+from ..rescue_crop import crop_region
 from ..truth import find_repeating_lines
 from ..viewer import encode_image
 

@@ -17,6 +17,7 @@ from pathlib import Path
 __version__ = "0.1.0"
 
 _ROOT = Path(__file__).resolve().parents[2]
+# ที่เก็บโมเดลทั้งหมด — ลบโฟลเดอร์นี้ทิ้งได้เลยถ้าอยากเคลียร์พื้นที่
 _CACHE = _ROOT / "vendor" / "cache"
 
 # ตัวแปร -> โฟลเดอร์ย่อย  (ยืนยันชื่อตัวแปรจากซอร์สของแต่ละไลบรารีแล้ว)
@@ -74,7 +75,3 @@ def _redirect_model_caches() -> None:
 
 _redirect_model_caches()
 
-
-def cache_root() -> Path:
-    """ที่เก็บโมเดลทั้งหมด — ลบโฟลเดอร์นี้ทิ้งได้เลยถ้าอยากเคลียร์พื้นที่"""
-    return _CACHE

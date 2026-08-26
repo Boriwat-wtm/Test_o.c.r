@@ -28,7 +28,7 @@ from thai_ocr_bench.metrics import (
     top_confusions,
 )
 from thai_ocr_bench.render import load_pages
-from thai_ocr_bench.thai_text import CLASS_LABELS_TH, normalize
+from thai_ocr_bench.thai_text import CLASS_LABELS_TH
 from thai_ocr_bench.truth import find_repeating_lines, load as load_truth
 
 

@@ -24,7 +24,11 @@ paddle = ["paddleocr>=3.7.0", "paddlepaddle>=3.3.1"]
 # ใช้โมเดลชุดเดียวกันผ่าน ONNX จึงไม่ต้องพึ่ง framework ของ Paddle
 # หมายเหตุ: แพ็กเกจชื่อ rapidocr-onnxruntime เลิกพัฒนาแล้ว (ค้างที่ 1.4.4)
 rapid = ["rapidocr>=3.9.2", "onnxruntime>=1.20"]
-typhoon = ["typhoon-ocr>=0.4.1"]
+# openai ต้องประกาศเองด้วย แม้ typhoon-ocr จะลากมาให้อยู่แล้ว
+# เพราะ typhoon_api.py เรียก `from openai import OpenAI` ตรง ๆ เพื่อคุมค่า
+# temperature/top_p ที่ ocr_document() ตรึงไว้ ถ้าวันหนึ่ง typhoon-ocr
+# เลิกใช้ openai โค้ดเราจะพังทันทีโดยที่ uv sync ไม่เตือนอะไรเลย
+typhoon = ["typhoon-ocr>=0.4.1", "openai>=1.0"]
 # ThaiTrOCR กับ typhoon-2b โหลดโมเดลผ่าน transformers และต้องมี torch
 # accelerate จำเป็นเพราะโค้ดใช้ device_map="cuda:0" ซึ่ง transformers บังคับให้มี
 # ถ้าขาด engine จะรายงานว่าพร้อมใช้แล้วไปพังตอนโหลดโมเดลทุกหน้า
@@ -38,6 +42,7 @@ all = [
     "paddleocr>=3.7.0",
     "paddlepaddle>=3.3.1",
     "typhoon-ocr>=0.4.1",
+    "openai>=1.0",
     "transformers>=5.0",
     "torch>=2.8",
     "accelerate>=1.0",
@@ -75,3 +80,8 @@ packages = ["src/thai_ocr_bench"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# เทสต์ที่รันหน้าเว็บทั้งหน้าใช้เวลา ~2 นาที ซึ่งเป็น 98% ของทั้งชุด
+# ตัดออกจากการรันปกติ เพื่อให้ `pytest` ยังจบใน ~1 วินาทีเหมือนเดิม
+# รันตัวช้าเมื่อจะ commit งานที่แตะหน้าเว็บ: pytest -m slow
+addopts = "-m 'not slow'"
+markers = ["slow: รันช้า (เปิดหน้าเว็บจริง) — รันด้วย pytest -m slow"]

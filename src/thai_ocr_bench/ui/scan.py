@@ -111,7 +111,7 @@ def scan_status() -> None:
         )
         # ผลใหม่จะยังไม่โผล่จนกว่าหน้าจะโหลดใหม่ เพราะ store.load() ถูกเรียก
         # ตอนต้น main() ไปแล้ว ให้ปุ่มไว้แทนการ rerun เองเพื่อไม่ให้จอกระตุก
-        if st.button("โหลดผลใหม่", use_container_width=True):
+        if st.button("โหลดผลใหม่", width="stretch"):
             st.cache_data.clear()
             st.rerun()
         return
@@ -192,7 +192,7 @@ def scan_panel(pages: list[PageInfo], results: dict) -> None:
         )
     if st.button(
         "อ่านไฟล์ใหม่จากโฟลเดอร์ต้นทาง",
-        use_container_width=True,
+        width="stretch",
         type="primary" if new_pdfs else "secondary",
     ):
         with st.spinner("กำลังแปลง PDF เป็นภาพ…"):
@@ -228,18 +228,18 @@ def scan_panel(pages: list[PageInfo], results: dict) -> None:
     # ปุ่มต้องโผล่เสมอแม้กดไม่ได้ ถ้า return ทิ้งตอนไม่มี engine
     # ผู้ใช้จะหาปุ่มไม่เจอแล้วนึกว่าฟีเจอร์ไม่มีอยู่จริง
     if active:
-        st.button("กำลังสแกนอยู่…", disabled=True, use_container_width=True)
+        st.button("กำลังสแกนอยู่…", disabled=True, width="stretch")
     elif not names:
-        st.button("เริ่มสแกน", disabled=True, use_container_width=True)
+        st.button("เริ่มสแกน", disabled=True, width="stretch")
         st.caption("ยังไม่มี engine พร้อมใช้ — `uv sync --extra all`")
     elif todo == 0:
         # กดไปก็ข้ามหมดแล้วจบใน 0 วินาที ต้องบอกก่อนไม่ใช่ปล่อยให้กดแล้วงง
-        st.button("เริ่มสแกน", disabled=True, use_container_width=True)
+        st.button("เริ่มสแกน", disabled=True, width="stretch")
         st.caption(f"มีผลครบแล้วทั้ง {skip:,} ครั้ง — ติ๊ก **อ่านใหม่** ถ้าต้องการอ่านซ้ำ")
     else:
         note = f" · ข้าม {skip:,} ที่มีผลแล้ว" if skip else ""
         st.caption(f"จะอ่าน {todo:,} ครั้ง{note}")
-        if st.button("เริ่มสแกน", type="primary", use_container_width=True):
+        if st.button("เริ่มสแกน", type="primary", width="stretch"):
             start_scan(use_engines, use_docs, clean=clean, redo=redo)
             st.rerun()
 

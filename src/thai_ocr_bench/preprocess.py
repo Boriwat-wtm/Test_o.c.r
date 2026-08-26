@@ -91,12 +91,6 @@ def has_watermark(
     )
 
 
-def ink_ratio(image: Image.Image, threshold: int = DEFAULT_THRESHOLD) -> float:
-    """สัดส่วนพิกเซลที่เป็นหมึก ใช้ตรวจว่าการลบไม่ได้กินตัวหนังสือไปด้วย"""
-    gray = np.asarray(image.convert("L"))
-    return float((gray < threshold).mean())
-
-
 def clean_file(
     src: Path, dst: Path, threshold: int = DEFAULT_THRESHOLD, *, always: bool = False
 ) -> tuple[float, float, bool]:

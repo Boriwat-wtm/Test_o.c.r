@@ -24,10 +24,16 @@ from thai_ocr_bench.config import IMAGE_DIR
 pytest.importorskip("streamlit.testing.v1")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-pytestmark = pytest.mark.skipif(
-    not IMAGE_DIR.exists() or not any(IMAGE_DIR.glob("*.png")),
-    reason="ยังไม่มีภาพใน data/images — รัน render_pages.py ก่อน",
-)
+# ตัวนี้รันสคริปต์หน้าเว็บทั้งหน้าจริง จึงใช้เวลาราว 2 นาที ซึ่งกลบเทสต์
+# ที่เหลือทั้งชุด (111 ตัวรวมกันไม่ถึง 1 วินาที) ติด marker slow ไว้ให้
+# `pytest` เฉย ๆ ข้ามไป แล้วรันเองตอนแตะโค้ดหน้าเว็บด้วย `pytest -m slow`
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        not IMAGE_DIR.exists() or not any(IMAGE_DIR.glob("*.png")),
+        reason="ยังไม่มีภาพใน data/images — รัน render_pages.py ก่อน",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

@@ -255,11 +255,11 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
         st.session_state.pop("cmp_page", None)  # เปลี่ยนเอกสารแล้วรายการหน้าเปลี่ยนตาม
     here = keys.index(st.session_state.get("cmp_page", keys[0]))
 
-    if top[2].button("‹", disabled=here == 0, use_container_width=True,
+    if top[2].button("‹", disabled=here == 0, width="stretch",
                      help="หน้าก่อนหน้า"):
         st.session_state["cmp_page"] = keys[here - 1]
         st.rerun()
-    if top[3].button("›", disabled=here >= len(keys) - 1, use_container_width=True,
+    if top[3].button("›", disabled=here >= len(keys) - 1, width="stretch",
                      help="หน้าถัดไป"):
         st.session_state["cmp_page"] = keys[here + 1]
         st.rerun()
@@ -271,7 +271,7 @@ def view_compare(pages: list[PageInfo], results: dict) -> None:
     # ว่าง = ทุกตัว เหมือนแผงสั่งสแกน ถ้า default เป็นรายการเต็ม
     # มันจะกาง chip ทั้ง 8 ตัวอัดอยู่ในคอลัมน์แคบ ๆ จนบังแถวควบคุมทั้งแถว
     all_engines = sorted(results)
-    with top[4].popover("⚙️ การแสดงผล", use_container_width=True):
+    with top[4].popover("⚙️ การแสดงผล", width="stretch"):
         chosen = (
             st.multiselect(
                 "engine ที่จะแสดง",
@@ -537,7 +537,7 @@ def page_round_history(page_id: str) -> None:
                     "สถานะ": "เสร็จ" if r["ok"] else f"พัง: {r.get('error')}",
                 }
             )
-        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.dataframe(table, width="stretch", hide_index=True)
         st.caption(
             "เลขอารบิกในเอกสารเลขไทยคืออาการอ่านผิดที่งานนี้วัดโดยตรง "
             "ตัวเลขสองคอลัมน์นี้จึงบอกได้เร็วกว่าอ่านข้อความเอง"

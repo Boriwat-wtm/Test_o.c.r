@@ -72,7 +72,7 @@ def view_history() -> None:
                         }
                     )
             if table:
-                st.dataframe(table, use_container_width=True, hide_index=True)
+                st.dataframe(table, width="stretch", hide_index=True)
             else:
                 st.caption("ไม่มี engine ไหนได้รันในรอบนี้")
 

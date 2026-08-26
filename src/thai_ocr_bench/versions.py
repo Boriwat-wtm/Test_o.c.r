@@ -20,6 +20,7 @@ TRACKED_PACKAGES = (
     "easyocr",
     "surya-ocr",
     "typhoon-ocr",
+    "openai",  # ตัวคุยกับ API ของ Typhoon มีผลต่อผลลัพธ์โดยตรง
     "torch",
     "transformers",
     "onnxruntime",

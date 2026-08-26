@@ -14,7 +14,7 @@ from ..render import PageInfo
 from ..rescue_crop import ZOOM
 from .common import page_label, rescue_crop_uri
 
-def start_rescue(engine: str, limit: int | None) -> None:
+def start_rescue(engine: str, limit: int | None, samples: int = 1) -> None:
     """สั่ง rescue.py เป็นคนละโปรเซส แบบเดียวกับปุ่มสแกน
 
     ต้องแยกโปรเซสเพราะการอ่านซ้ำยิง API ทีละจุดโดยมี throttle 3.1 วินาที
@@ -23,6 +23,8 @@ def start_rescue(engine: str, limit: int | None) -> None:
     cmd = [sys.executable, str(ROOT / "rescue.py"), "--engine", engine]
     if limit:
         cmd += ["--limit", str(limit)]
+    if samples > 1:
+        cmd += ["--samples", str(samples)]
 
     log = RESULTS_DIR / "rescue.log"
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -38,7 +40,7 @@ def start_rescue(engine: str, limit: int | None) -> None:
 def rescue_controls(results: dict) -> None:
     """แผงสั่งอ่านซ้ำ — วางไว้บนสุดของแท็บ ไม่ต้องออกไปพิมพ์คำสั่งเอง"""
     with st.container(border=True):
-        c1, c2, c3 = st.columns([3, 1.2, 1.4])
+        c1, c2, c3, c4 = st.columns([2.6, 1.0, 1.2, 1.3])
         names = sorted(results)
         if not names:
             st.caption("ยังไม่มีผล OCR ให้อ่านซ้ำ — สแกนก่อน")
@@ -48,10 +50,24 @@ def rescue_controls(results: dict) -> None:
         engine = c1.selectbox("engine ที่จะให้อ่านซ้ำ", names, index=default)
         limit = c2.number_input("จำกัดจุด", min_value=0, max_value=999, value=0,
                                 help="0 = ไม่จำกัด ใส่เลขไว้ลองก่อนได้")
-        c3.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
-        if c3.button("เริ่มอ่านซ้ำ", type="primary", use_container_width=True):
-            start_rescue(engine, int(limit) or None)
-            st.success("สั่งแล้ว — กดโหลดใหม่อีกครั้งเมื่อรันเสร็จ")
+
+        # อ่านซ้ำแบบสุ่มมีเฉพาะตระกูล typhoon ตัวอื่นควบคุมการสุ่มไม่ได้
+        # จึงซ่อนช่องนี้ไปเลยแทนที่จะให้เลือกแล้วไม่มีผล
+        supports = engine.split("+")[0].startswith("typhoon")
+        samples = c3.number_input(
+            "อ่านกี่รอบ", min_value=1, max_value=9, value=1, step=1,
+            disabled=not supports,
+            help="มากกว่า 1 = อ่านซ้ำแบบสุ่มแล้วเทียบว่าตอบตรงกันไหม "
+            "จุดที่ตอบไม่ตรงกันคือจุดที่ engine เองก็ไม่มั่นใจ "
+            "(ใช้ได้เฉพาะตระกูล typhoon · กินเวลาและโควตา N เท่า)"
+            if supports else "engine นี้ควบคุมการสุ่มไม่ได้ อ่านได้รอบเดียวเสมอ",
+        )
+
+        c4.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
+        if c4.button("เริ่มอ่านซ้ำ", type="primary", width="stretch"):
+            start_rescue(engine, int(limit) or None, int(samples))
+            note = f" · อ่านซ้ำ {samples} รอบต่อจุด" if samples > 1 else ""
+            st.success(f"สั่งแล้ว{note} — กดโหลดใหม่อีกครั้งเมื่อรันเสร็จ")
 
 
 def view_rescue(pages: list[PageInfo], results: dict) -> None:

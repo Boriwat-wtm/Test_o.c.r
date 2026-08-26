@@ -49,7 +49,7 @@ def view_images(pages: list[PageInfo]) -> None:
                     st.image(
                         str(image),
                         caption=f"หน้า {page.page_no} · {page.width}x{page.height}",
-                        use_container_width=True,
+                        width="stretch",
                     )
 
 
