@@ -24,10 +24,9 @@ import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from PIL import Image
-
 from thai_ocr_bench import store
 from thai_ocr_bench.config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR, ensure_dirs
+from thai_ocr_bench.rescue_crop import ZOOM, crop_to_file
 from thai_ocr_bench.engines import get_engines
 from thai_ocr_bench.suspect import (
     Suspect,
@@ -41,17 +40,6 @@ from thai_ocr_bench.truth import find_repeating_lines
 
 REPORT_FILE = "rescue.json"
 
-# ครอปชิดตัวอักษรเกินไปจะตัดวรรณยุกต์บนกับสระล่างทิ้ง ซึ่งเป็นตัวที่ต้องอ่านที่สุด
-PAD_Y = 16
-# แนวนอนเผื่อเยอะกว่ามาก เพราะกล่องที่ยืมมามักจบก่อนตัวอักษรตัวสุดท้ายของบรรทัด
-# ๒๐๐ px ที่ ๓๐๐ DPI ราวสองเซนติเมตร พอครอบส่วนที่ engine ตีกรอบพลาด
-PAD_X = 200
-# ขยายให้ตัวหนังสือใหญ่ขึ้น เป็นหัวใจของ self-rescue — บรรทัดที่ย่อรวมมากับทั้งหน้า
-# จะมีความละเอียดต่อตัวอักษรต่ำกว่าตอนส่งไปเดี่ยว ๆ มาก
-ZOOM = 4
-# ไม่ให้ภาพครอปใหญ่เกินจำเป็น เปลืองโทเคนเปล่า ๆ
-MAX_WIDTH = 3000
-
 
 @dataclass
 class Rescued:
@@ -63,36 +51,9 @@ class Rescued:
     box: list[int]
     error: str | None = None
     # เติมเฉพาะตอนใช้ --samples > 1 กับ engine ที่รองรับ read_variants()
-    # ค่าเริ่มต้นว่างไว้เพื่อให้ผลเก่าที่ยังไม่มีสองฟิลด์นี้อ่านกลับมาได้ (asdict ฝั่งเขียน
-    # ใส่มาเสมอ แต่โครงนี้กันไว้เผื่อมีโค้ดอื่นสร้าง Rescued ตรง ๆ โดยไม่ผ่าน main())
+    # ค่าเริ่มต้นว่างไว้เพื่อให้ผลเก่าที่ยังไม่มีสองฟิลด์นี้อ่านกลับมาได้
     variants: list[str] = field(default_factory=list)
     agree: bool | None = None
-
-
-def crop_line(image_path: Path, box: tuple[int, int, int, int], out: Path) -> None:
-    """ตัดบรรทัดเดียวออกมาแล้วขยาย เก็บเป็นไฟล์ให้ engine อ่าน
-
-    เผื่อขอบแนวนอนมากกว่าแนวตั้ง เพราะกล่องที่ยืมมาพลาดคนละแบบในสองแกน
-    ตำแหน่งแนวตั้งของบรรทัดแม่นกว่าขอบเขตแนวนอนมาก
-
-    เคยลองครอปเต็มความกว้างหน้าเทียบด้วย ผลออกมาเท่ากันทุกตัวเลข
-    จึงเลือกครอปตามกล่องเพราะภาพเล็กกว่า ประหยัดโทเคน
-    """
-    with Image.open(image_path) as im:
-        x, y, w, h = box
-        area = (
-            max(0, x - PAD_X),
-            max(0, y - PAD_Y),
-            min(im.width, x + w + PAD_X),
-            min(im.height, y + h + PAD_Y),
-        )
-        piece = im.crop(area).convert("RGB")
-    scale = min(ZOOM, MAX_WIDTH / max(piece.width, 1))
-    if scale > 1:
-        piece = piece.resize(
-            (int(piece.width * scale), int(piece.height * scale)), Image.LANCZOS
-        )
-    piece.save(out)
 
 
 def collect_suspects(results: dict, engine: str) -> list[Suspect]:
@@ -160,7 +121,10 @@ def main() -> None:
         return
 
     img_dir = CLEAN_IMAGE_DIR if engine_variant(args.engine) == "clean" else IMAGE_DIR
-    print(f"อ่านซ้ำ {len(suspects)} จุด ด้วย {base} (ภาพจาก {img_dir.name}/)\n")
+    print(
+        f"อ่านซ้ำ {len(suspects)} จุด ด้วย {base} "
+        f"(ครอปทีละบรรทัดจาก {img_dir.name}/ แล้วขยาย {ZOOM} เท่า)\n"
+    )
 
     # read_variants() มีเฉพาะตระกูล typhoon (ทั้ง typhoon-2b ในเครื่องและฝั่ง API)
     # ซึ่งควบคุมค่า sampling ตอนสร้างคำตอบได้ engine อื่นอ่านรอบเดียวเสมอ
@@ -177,7 +141,7 @@ def main() -> None:
                 print(f"  {i}/{len(suspects)} ข้าม {s.page_id} — ไม่พบภาพ")
                 continue
             piece = Path(tmp) / f"{s.page_id}_{s.grid_line}.png"
-            crop_line(src, s.box, piece)  # type: ignore[arg-type]
+            crop_to_file(src, s.box, piece)  # type: ignore[arg-type]
 
             variants: list[str] = []
             agree: bool | None = None

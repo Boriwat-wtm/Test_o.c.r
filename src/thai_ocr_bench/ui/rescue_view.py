@@ -11,7 +11,8 @@ import streamlit as st
 from .. import history
 from ..config import IMAGE_DIR, RESULTS_DIR, ROOT
 from ..render import PageInfo
-from .common import _crop, page_label
+from ..rescue_crop import ZOOM
+from .common import page_label, rescue_crop_uri
 
 def start_rescue(engine: str, limit: int | None) -> None:
     """สั่ง rescue.py เป็นคนละโปรเซส แบบเดียวกับปุ่มสแกน
@@ -121,18 +122,21 @@ def view_rescue(pages: list[PageInfo], results: dict) -> None:
         if r.get("agree") is False:
             head = "⚠️ " + head + " · ไม่มั่นใจ"
         with st.expander(head, expanded=(i == 0)):
-            # ครอปด้วยกรอบเดียวกับที่ rescue ใช้ จะได้เห็นสิ่งที่ engine เห็นตอนอ่านซ้ำ
-            img = _crop(str(IMAGE_DIR / f"{r['page_id']}.png"), tuple(r["box"]), pad=24)
+            # ต้องเป็นภาพชุดเดียวกับที่ส่งเข้า engine ไม่ใช่ครอปย่อไว้ดูเฉย ๆ
+            # เดิมใช้ _crop(pad=24) ซึ่งเผื่อขอบกับอัตราขยายคนละแบบ คนตรวจจึง
+            # เห็นภาพคนละใบกับที่ engine อ่าน แล้วสรุปผิดได้
+            img = rescue_crop_uri(str(IMAGE_DIR / f"{r['page_id']}.png"), tuple(r["box"]))
             if img:
                 st.markdown(
                     f'<img src="{img}" style="width:100%;border:1px solid #E4E6EC;'
                     f'border-radius:8px" alt="ภาพบรรทัดที่อ่านซ้ำ">',
                     unsafe_allow_html=True,
                 )
+                st.caption(f"ภาพที่ engine เห็น — ครอปบรรทัดนี้แล้วขยาย {ZOOM} เท่า")
             a, b = st.columns(2)
             a.markdown("**เดิม** (อ่านรวมทั้งหน้า)")
             a.code(r["before"] or "(ว่าง)")
-            b.markdown("**อ่านซ้ำ** (ครอป · ขยาย 4 เท่า)")
+            b.markdown(f"**อ่านซ้ำ** (ครอป · ขยาย {ZOOM} เท่า)")
             b.code(r["after"] or "(ว่าง)")
 
             # อ่านซ้ำหลายรอบแบบสุ่มแล้วตอบไม่ตรงกัน = engine เองก็ไม่มั่นใจตรงนี้

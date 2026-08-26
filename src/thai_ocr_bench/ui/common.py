@@ -17,6 +17,7 @@ from PIL import Image
 
 from ..config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR
 from ..render import PageInfo, load_pages
+from ..rescue_crop import ZOOM, crop_region
 from ..truth import find_repeating_lines
 from ..viewer import encode_image
 
@@ -166,6 +167,26 @@ def _crop(path: str, box: tuple[int, int, int, int], pad: int = 12) -> str | Non
             crop = crop.resize((int(crop.width * scale), 90), Image.LANCZOS)
         buf = io.BytesIO()
         crop.save(buf, format="WEBP", quality=88)
+    return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def rescue_crop_uri(path: str, box: tuple[int, int, int, int]) -> str | None:
+    """ภาพบรรทัดเดียวแบบเดียวกับที่ engine เห็นตอนอ่านซ้ำ (ขยาย 4 เท่า)
+
+    ต่างจาก _crop() ซึ่งเป็นครอปแบบย่อไว้ดูเฉย ๆ (เผื่อขอบแค่ 12 px
+    และขยายเฉพาะบรรทัดที่เตี้ยมาก) ตัวนั้นใช้กับจุดน่าสงสัยทั่วไปที่ยัง
+    ไม่เคยถูกอ่านซ้ำ ส่วนตัวนี้ต้องตรงกับภาพที่ส่งเข้า engine จริง
+    ไม่งั้นคนตรวจจะสรุปผิดว่า "เห็นชัดขนาดนี้ยังอ่านผิด"
+    """
+    import base64
+    import io
+
+    piece = crop_region(Path(path), box)
+    if piece is None:
+        return None
+    buf = io.BytesIO()
+    piece.save(buf, format="WEBP", quality=88)
     return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
 
 

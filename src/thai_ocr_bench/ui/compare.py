@@ -20,10 +20,11 @@ from ..suspect import thai_digit_document
 from ..thai_text import THAI_DIGITS, normalize
 from ..truth import load as load_truth
 from ..viewer import EngineRecord, LineRecord, build_html
+from ..rescue_crop import ZOOM
 from .common import (
-    _crop,
     cached_image,
     page_label,
+    rescue_crop_uri,
     unstable_points,
     engine_group,
     image_dir_for,
@@ -352,12 +353,19 @@ def unstable_banner(picked: PageInfo) -> None:
             for j, v in enumerate(p.get("variants") or [], 1):
                 st.code(f"รอบ {j}: {v}")
             if p.get("box"):
-                uri = _crop(str(IMAGE_DIR / f"{picked.page_id}.png"), tuple(p["box"]))
+                # ต้องเป็นภาพชุดเดียวกับที่ส่งเข้า engine ตอนอ่านซ้ำ ไม่ใช่ครอปย่อ
+                # ไม่งั้นคนตรวจเห็นภาพชัดกว่าที่ engine เห็นจริง แล้วสรุปผิด
+                uri = rescue_crop_uri(
+                    str(IMAGE_DIR / f"{picked.page_id}.png"), tuple(p["box"])
+                )
                 if uri:
                     st.markdown(
                         f'<img src="{uri}" style="width:100%;border-radius:.5rem;'
                         f'border:1px solid var(--border)">',
                         unsafe_allow_html=True,
+                    )
+                    st.caption(
+                        f"ภาพที่ engine เห็นตอนอ่านซ้ำ — ครอปบรรทัดนี้แล้วขยาย {ZOOM} เท่า"
                     )
 
 

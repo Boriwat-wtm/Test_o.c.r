@@ -179,7 +179,7 @@ def view_suspects(pages: list[PageInfo], results: dict) -> None:
                                 unsafe_allow_html=True,
                             )
                             st.caption(
-                                "ครอปจากภาพจริง · พิกัด"
+                                "ครอปจากภาพต้นฉบับตามขนาดจริง (ไม่ได้ขยาย) · พิกัด"
                                 f"{' ' + s.box_from if s.box_from else ''}"
                             )
                 else:
