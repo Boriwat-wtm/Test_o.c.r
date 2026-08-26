@@ -11,7 +11,7 @@ import json
 
 from thai_ocr_bench.config import TRUTH_DIR
 from thai_ocr_bench.thai_text import THAI_DIGITS, classify_char
-from thai_ocr_bench.truth import build_from_sources
+from thai_ocr_bench.truth import build_from_sources, truth_defects
 
 
 def main() -> None:
@@ -43,6 +43,21 @@ def main() -> None:
         print(f"\nบรรทัดที่กรองออก (สงสัยเป็นลายน้ำ/หัวท้ายกระดาษ) — {report.stem}")
         for line in dropped[:12]:
             print(f"  · {line[:90]}")
+
+    # ตรวจเฉลยเองก่อนเอาไปใช้ — เจอเฉลยเสียมาสองรอบแล้วทั้งคู่โดยบังเอิญ
+    # ทุกตัวเลขในโปรเจกต์เชื่อถือได้เท่ากับเฉลยเท่านั้น
+    defects = [(pid, d) for pid, page in pages.items() for d in truth_defects(page.lines)]
+    if defects:
+        print(f"\n⚠ เฉลยมีจุดที่น่าจะเสีย {len(defects)} จุด — ต้องดูด้วยตาแล้วแก้เอง")
+        print("  (ตั้งใจไม่ซ่อมอัตโนมัติ เพราะเดาว่าต้นฉบับควรเป็นอะไร"
+              " คือสร้างเฉลยผิดชนิดใหม่)")
+        for pid, (line_no, label, snippet) in defects[:10]:
+            print(f"  · {pid} บรรทัด {line_no + 1} — {label}")
+            print(f"      {snippet!r}")
+        if len(defects) > 10:
+            print(f"  · ...อีก {len(defects) - 10} จุด")
+    else:
+        print("\nตรวจเฉลยแล้วไม่พบจุดที่น่าจะเสีย")
 
     print("\nตัวอย่างเฉลย 3 หน้าแรก")
     for page_id, page in list(pages.items())[:3]:
