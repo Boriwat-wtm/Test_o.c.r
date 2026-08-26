@@ -11,7 +11,11 @@ from thai_ocr_bench.thai_text import (
     reorder_marks,
     thai_to_arabic_digits,
 )
-from thai_ocr_bench.truth import needs_sara_repair, repair_sara
+from thai_ocr_bench.truth import (
+    join_split_sara_am,
+    needs_sara_repair,
+    repair_sara,
+)
 
 
 class TestReorderMarks:
@@ -113,3 +117,30 @@ class TestCompare:
         lenient = compare("๒๕๖๗", "2567", lenient_digits=True)
         assert strict.cer > 0
         assert lenient.cer == 0.0
+
+
+class TestJoinSplitSaraAm:
+    """สระอำที่ถูกหั่นเป็น 'พยัญชนะ + ช่องว่าง + สระอา' ตอนดึง text layer
+
+    คนละอาการกับที่ repair_sara ซ่อม และถ้าไม่ซ่อมจะกลายเป็นลงโทษ engine
+    ที่อ่านถูก เพราะตัววัดตัดช่องว่างทิ้งก่อนเทียบ 'ท า' จึงกลายเป็น 'ทา'
+    แล้วชนกับ 'ทำ' (วัดจริง: 113 จุดในกฎกระทรวง ๕๙ ดัน CER ขึ้น ~1.2 จุด)
+    """
+
+    def test_ต่อคำที่ถูกหั่นกลับได้(self):
+        assert join_split_sara_am("อาศัยอ านาจตามความ") == "อาศัยอำนาจตามความ"
+        assert join_split_sara_am("การท าประโยชน์") == "การทำประโยชน์"
+        assert join_split_sara_am("ส านักงานที่ดิน") == "สำนักงานที่ดิน"
+
+    def test_ไม่แตะข้อความที่ถูกอยู่แล้ว(self):
+        ok = "สำนักงานคณะกรรมการกฤษฎีกา"
+        assert join_split_sara_am(ok) == ok
+
+    def test_ไม่กินช่องว่างระหว่างคำปกติ(self):
+        """ช่องว่างที่ตามด้วยตัวอื่นซึ่งไม่ใช่สระอา ต้องอยู่ครบ"""
+        line = "มาตรา ๙ ภายใต้บังคับกฎหมาย"
+        assert join_split_sara_am(line) == line
+
+    def test_ช่องว่างหน้าสระอาที่ไม่มีพยัญชนะนำต้องไม่ถูกแตะ(self):
+        """กฎผูกกับพยัญชนะนำหน้าเสมอ ไม่ใช่จับ ' า' ลอย ๆ"""
+        assert join_split_sara_am("๙ าก") == "๙ าก"
