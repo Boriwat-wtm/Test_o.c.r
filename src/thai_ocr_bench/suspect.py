@@ -63,6 +63,30 @@ def thai_digit_document(lines: list[str], ratio: float = 4.0) -> bool:
     return thai >= 10 and thai > arabic * ratio
 
 
+def thai_digit_by_document(pages: dict[str, list[str]]) -> dict[str, bool]:
+    """ตัดสินทีละเอกสารว่าใช้เลขไทยเป็นหลักไหม แล้วคืนคำตอบรายหน้า
+
+    ทำไมต้องแยกตามเอกสาร — คลังมีทั้งเอกสารเลขไทยล้วน (ประมวลกฎหมายที่ดิน)
+    และเอกสารที่ใช้เลขอารบิก (หนังสือเวียนยุค พ.ศ. ๒๔๕๙) ถ้าเอาทุกหน้ามารวม
+    แล้วตัดสินครั้งเดียว ค่าจะผิดสำหรับฝั่งใดฝั่งหนึ่งเสมอ
+    วัดจริงตอนที่ยังรวมกัน: tesseract-tha พลาดการเตือน 82 จุดเพราะโค้ดคิดว่า
+    ทั้งคลังเป็นเอกสารเลขอารบิก จึงปิดกฎ "เลขอารบิกในเอกสารเลขไทย" ทิ้ง
+    ทั้งที่ 23 หน้าของมันเป็นเอกสารเลขไทยล้วน ส่วน easyocr-th เตือนเกิน 27 จุด
+    จากเหตุผลกลับกัน
+
+    ตัดสินที่ระดับเอกสารไม่ใช่ระดับหน้า เพราะหน้าเดียวอาจไม่มีตัวเลขเลย
+    แล้วจะตัดสินไม่ได้ ทั้งที่เอกสารทั้งฉบับชัดเจนว่าใช้เลขแบบไหน
+
+    page_id ต้องอยู่ในรูป <doc_id>_p<หมายเลข> ตามที่ render.py ตั้งให้
+    """
+    grouped: dict[str, list[str]] = {}
+    for pid, lines in pages.items():
+        grouped.setdefault(pid.rsplit("_p", 1)[0], []).extend(lines)
+
+    verdict = {doc: thai_digit_document(lines) for doc, lines in grouped.items()}
+    return {pid: verdict[pid.rsplit("_p", 1)[0]] for pid in pages}
+
+
 def rule_findings(line: str, *, thai_doc: bool) -> list[tuple[int, int, str, str]]:
     """หาจุดที่กฎตายตัวจับได้ในบรรทัดเดียว
 

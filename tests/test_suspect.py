@@ -17,6 +17,7 @@ from thai_ocr_bench.suspect import (
     section_findings_by_document,
     section_length_outliers,
     section_suspects,
+    thai_digit_by_document,
     thai_digit_document,
 )
 
@@ -40,6 +41,41 @@ class TestThaiDigitDocument:
     def test_too_few_digits_is_not_enough(self):
         """เอกสารที่แทบไม่มีตัวเลข ตัดสินไม่ได้ ต้องไม่เดา"""
         assert thai_digit_document(["ให้ประกาศว่า", "โดยที่เป็นการสมควร"]) is False
+
+
+class TestThaiDigitByDocument:
+    """ต้องตัดสินทีละเอกสาร ไม่ใช่รวมทั้งคลังแล้วได้ค่าเดียว"""
+
+    # ต้องมีเลขไทยอย่างน้อย 10 ตัวถึงจะผ่านเกณฑ์ของ thai_digit_document
+    # (เอกสารที่แทบไม่มีตัวเลขตัดสินไม่ได้ จึงตั้งขั้นต่ำไว้)
+    THAI = [
+        "มาตรา ๙ ให้ไว้ ณ วันที่ ๓๐ พฤศจิกายน พ.ศ. ๒๔๙๗",
+        "มาตรา ๑๐ วรรค ๒ แห่งประมวลกฎหมายที่ดิน พ.ศ. ๒๔๙๗",
+    ]
+    ARABIC = ["วันที่ 20 เมษายน พระพุทธศักราช 2459 ฉบับที่ 24 จำนวน 20 ฉบับ"]
+
+    def test_เอกสารคนละแบบในคลังเดียวกันต้องได้คำตอบคนละอย่าง(self):
+        """เคสที่เป็นเหตุให้ต้องแก้ — เดิมรวมทุกหน้าแล้วตัดสินครั้งเดียว
+        ทำให้ค่าผิดสำหรับฝั่งใดฝั่งหนึ่งเสมอ (วัดแล้ว tesseract พลาดเตือน 82 จุด)"""
+        got = thai_digit_by_document({
+            "docA_p001": self.THAI,
+            "docA_p002": self.THAI,
+            "docB_p001": self.ARABIC,
+        })
+        assert got == {"docA_p001": True, "docA_p002": True, "docB_p001": False}
+
+    def test_ตัดสินที่ระดับเอกสารไม่ใช่ระดับหน้า(self):
+        """หน้าที่ไม่มีตัวเลขเลยต้องได้คำตอบตามเอกสารที่มันสังกัด
+        ไม่ใช่ตอบ False เพราะตัวมันเองตัดสินไม่ได้"""
+        got = thai_digit_by_document({
+            "docA_p001": self.THAI,
+            "docA_p002": ["หน้านี้ไม่มีตัวเลขเลย"],
+        })
+        assert got["docA_p002"] is True
+
+    def test_คืนคำตอบครบทุกหน้าที่ส่งเข้ามา(self):
+        pages = {f"docA_p{i:03d}": self.THAI for i in range(1, 4)}
+        assert set(thai_digit_by_document(pages)) == set(pages)
 
 
 class TestRuleLayer:

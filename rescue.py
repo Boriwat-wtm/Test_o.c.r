@@ -33,7 +33,7 @@ from thai_ocr_bench.suspect import (
     engine_variant,
     independent_peers,
     scan_page,
-    thai_digit_document,
+    thai_digit_by_document,
 )
 from thai_ocr_bench.thai_text import normalize
 from thai_ocr_bench.truth import find_repeating_lines
@@ -71,8 +71,10 @@ def collect_suspects(results: dict, engine: str) -> list[Suspect]:
 
     keep = set(independent_peers(engine, list(per))) | {engine}
     per = {n: v for n, v in per.items() if n in keep}
-    thai_doc = thai_digit_document(
-        [ln for lines, _ in per[engine].values() for ln in lines]
+    # ตัดสินทีละเอกสาร ไม่ใช่รวมทั้งคลัง — คลังมีทั้งเอกสารเลขไทยล้วนและ
+    # เอกสารเลขอารบิก รวมกันแล้วตัดสินครั้งเดียวจะผิดสำหรับฝั่งใดฝั่งหนึ่งเสมอ
+    thai_doc_of = thai_digit_by_document(
+        {pid: lines for pid, (lines, _b) in per[engine].items()}
     )
 
     # ไม่รวม section_length_outliers ตรงนี้ — จุดที่กฎนั้นจับมักไม่มีกล่อง
@@ -82,7 +84,7 @@ def collect_suspects(results: dict, engine: str) -> list[Suspect]:
     out: list[Suspect] = []
     for pid in sorted(per[engine]):
         page = {n: v[pid] for n, v in per.items() if pid in v}
-        out.extend(scan_page(pid, engine, page, thai_doc=thai_doc))
+        out.extend(scan_page(pid, engine, page, thai_doc=thai_doc_of[pid]))
     return [s for s in out if s.box]
 
 

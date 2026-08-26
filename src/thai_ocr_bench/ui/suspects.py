@@ -12,7 +12,7 @@ from ..suspect import (
     scan_page,
     section_findings_by_document,
     section_suspects,
-    thai_digit_document,
+    thai_digit_by_document,
 )
 from .common import _crop, image_dir_for
 from .theme import pill
@@ -37,14 +37,15 @@ def _scan_suspects(engine: str, _results: dict) -> list:
     keep = set(independent_peers(engine, list(per_engine))) | {engine}
     per_engine = {n: v for n, v in per_engine.items() if n in keep}
 
-    thai_doc = thai_digit_document(
-        [ln for lines, _ in per_engine[engine].values() for ln in lines]
-    )
+    lines_of = {pid: lines for pid, (lines, _b) in per_engine[engine].items()}
 
-    # เลขมาตรายาวผิดปกติต้องตั้งฐานนิยมจากทั้งเอกสาร ไม่ใช่ทีละหน้า (หน้าเดียว
-    # มักมีเลขมาตราน้อยเกินจะตั้งฐานนิยมได้แม่น — ดู section_findings_by_document)
+    # ทั้งสองกฎนี้ตัดสินที่ระดับเอกสาร ไม่ใช่ระดับหน้าและไม่ใช่ระดับทั้งคลัง
+    #   thai_digit_by_document  เอกสารนี้ใช้เลขไทยหรือเลขอารบิก
+    #   section_findings_...    ฐานนิยมความยาวเลขมาตราของเอกสารนี้
+    thai_doc_of = thai_digit_by_document(lines_of)
+
     by_doc: dict[str, dict[str, list[str]]] = {}
-    for pid, (lines, _boxes) in per_engine[engine].items():
+    for pid, lines in lines_of.items():
         by_doc.setdefault(pid.rsplit("_p", 1)[0], {})[pid] = lines
     section_findings: dict[str, dict[int, list]] = {}
     for doc_pages in by_doc.values():
@@ -53,7 +54,7 @@ def _scan_suspects(engine: str, _results: dict) -> list:
     out = []
     for pid in sorted(per_engine[engine]):
         page = {n: v[pid] for n, v in per_engine.items() if pid in v}
-        out.extend(scan_page(pid, engine, page, thai_doc=thai_doc))
+        out.extend(scan_page(pid, engine, page, thai_doc=thai_doc_of[pid]))
         lines = per_engine[engine][pid][0]
         out.extend(section_suspects(pid, engine, lines, section_findings.get(pid, {})))
     return out

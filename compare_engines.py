@@ -136,8 +136,12 @@ def main() -> None:
         pace = sum(timings[name]) / max(1, len(timings[name])) / 1000
         strict_txt = f"{strict}/{total} ({strict / total:.0%})" if total else "-"
         lenient_txt = f"{lenient / total:.0%}" if total else "-"
+        # engine ที่ยังไม่เคยรันบนหน้าที่มีเฉลย จะไม่มีบรรทัดจับคู่ได้เลย
+        # aggregate() จึงคืน cer เป็น None — ต้องกันไว้ ไม่งั้นทั้งรายงานพัง
+        # เพราะ engine ตัวเดียว (เจอจริงกับ paddle-th-server ที่รันแค่หน้าไม่มีเฉลย)
+        cer_txt = f"{agg['cer']:.1%}" if agg["cer"] is not None else "-"
         print(
-            f"{name:<22}{agg['cer']:>7.1%}{f'{found}/{truth_total}':>12}"
+            f"{name:<22}{cer_txt:>8}{f'{found}/{truth_total}':>12}"
             f"{spurious:>13}{strict_txt:>16}{lenient_txt:>10}{pace:>9.1f}"
         )
 
@@ -147,7 +151,12 @@ def main() -> None:
     width = max(16, max(len(n) for n in names) + 2)
     print(f"{'ชนิด':<20}{'จำนวน':>9}" + "".join(f"{n:>{width}}" for n in names))
     print("-" * 78)
-    ref = aggregate(scores[names[0]])
+    # ใช้ตัวแรกที่มีข้อมูลจริงเป็นตัวอ้างจำนวนอักขระ ไม่ใช่ names[0] เฉย ๆ
+    # ซึ่งอาจเป็น engine ที่ยังไม่เคยรันบนหน้าที่มีเฉลย แล้วได้ตารางว่างทั้งตาราง
+    ref = next(
+        (a for a in (aggregate(scores[n]) for n in names) if a.get("cer") is not None),
+        aggregate(scores[names[0]]),
+    )
     for cls, label in CLASS_LABELS_TH.items():
         n = ref.get(f"n_{cls}") or 0
         if not n:
