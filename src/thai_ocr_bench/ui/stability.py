@@ -29,15 +29,28 @@ API_ENGINES = ("typhoon-api", "typhoon-api-num", "typhoon-api+clean", "typhoon-a
 
 
 @st.cache_data(show_spinner="กำลังนับจุดที่วัดได้…")
-def _docs_with_points(engine: str, _pages: list, _results: dict) -> list[tuple[str, int]]:
-    """นับจุดที่ครอปได้ แยกตามเอกสาร — ให้เห็นก่อนกดว่าจะยิง API กี่ครั้ง
+def _doc_status(engine: str, _pages: list, _results: dict) -> list[tuple[str, int, str]]:
+    """สถานะของ *ทุก* เอกสารในคลัง คืน (ชื่อ, จำนวนจุด, เหตุผลถ้าเป็นศูนย์)
+
+    ต้องคืนครบทุกฉบับ ไม่ใช่เฉพาะฉบับที่มีจุด — เดิมกรองฉบับที่ได้ศูนย์ทิ้ง
+    ผู้ใช้จึงเห็นตัวเลือกเดียวโดยไม่รู้ว่าอีกสิบฉบับหายไปไหน ทั้งที่เหตุผล
+    ต่างกันสองแบบและแก้คนละวิธี
+      ยังไม่ได้สแกน  ต้องไปสั่งสแกน engine นี้กับเอกสารนั้นก่อน
+      ไม่มีจุด       สแกนแล้วแต่ตัวหาจุดน่าสงสัยไม่เจออะไรที่ครอปได้
 
     เรียก collect_suspects ของ rescue.py ตัวเดียวกับที่ตัวรันใช้ ไม่เขียนซ้ำ
-    ไม่งั้นตัวเลขที่โชว์กับที่รันจริงจะไม่ตรงกัน
+    ไม่งั้นเลขที่โชว์กับที่รันจริงจะไม่ตรงกัน
     """
     import rescue  # นำเข้าตรงนี้เพราะเป็นสคริปต์ระดับราก ไม่ใช่โมดูลในแพ็กเกจ
 
     doc_of = {p.page_id: p.doc_name for p in _pages}
+    all_docs = sorted({p.doc_name for p in _pages})
+    scanned = {
+        doc_of[pid]
+        for pid, page in _results.get(engine, {}).items()
+        if page.ok and pid in doc_of
+    }
+
     counts: dict[str, int] = {}
     try:
         for s in rescue.collect_suspects(_results, engine):
@@ -45,8 +58,15 @@ def _docs_with_points(engine: str, _pages: list, _results: dict) -> list[tuple[s
             if d:
                 counts[d] = counts.get(d, 0) + 1
     except (KeyError, ValueError):
-        return []
-    return sorted(counts.items(), key=lambda kv: -kv[1])
+        counts = {}
+
+    out = []
+    for d in all_docs:
+        n = counts.get(d, 0)
+        why = "" if n else ("ไม่มีจุดน่าสงสัย" if d in scanned else "ยังไม่ได้สแกน")
+        out.append((d, n, why))
+    # ฉบับที่วัดได้ขึ้นก่อน เรียงตามจำนวนจุด ที่เหลือต่อท้ายตามตัวอักษร
+    return sorted(out, key=lambda r: (r[1] == 0, -r[1], r[0]))
 
 
 def _load(engine: str) -> list[dict]:
@@ -81,18 +101,19 @@ def _run_panel(pages: list[PageInfo], results: dict) -> None:
 
         # ต้องเลือกเอกสารได้ ไม่งั้นเหลือแค่ --limit ซึ่งตัดจากหัวรายการที่เรียง
         # ตาม page_id เอกสารท้าย ๆ จึงไม่มีวันถูกวัดเลย
-        docs = _docs_with_points(engine, pages, results)
-        options = [ALL_DOCS] + [d for d, _ in docs]
-        counts = {d: n for d, n in docs}
+        docs = _doc_status(engine, pages, results)
+        counts = {d: n for d, n, _ in docs}
+        reasons = {d: why for d, _, why in docs}
         doc = c2.selectbox(
             "เอกสาร",
-            options,
+            [ALL_DOCS] + [d for d, _, _ in docs],
             key="stab_doc",
             format_func=lambda d: (
                 f"{ALL_DOCS} ({sum(counts.values())} จุด)" if d == ALL_DOCS
-                else f"{short_doc(d, 30)} ({counts[d]} จุด)"
+                else f"{short_doc(d, 34)} — "
+                + (f"{counts[d]} จุด" if counts[d] else reasons[d])
             ),
-            help="นับเฉพาะจุดที่ครอปได้ — บางจุดมาจากกฎที่ดูทั้งเอกสาร ไม่ผูกกับพิกัด",
+            help="แสดงทุกฉบับในคลัง ฉบับที่วัดไม่ได้บอกเหตุผลไว้ท้ายชื่อ",
         )
 
         d1, d2 = st.columns(2)
@@ -104,6 +125,19 @@ def _run_panel(pages: list[PageInfo], results: dict) -> None:
             "จำกัดกี่จุด", min_value=0, max_value=500, value=0, step=10, key="stab_lim",
             help="0 = ทุกจุดของเอกสารที่เลือก · ใส่เลขไว้ตอนอยากลองก่อน",
         )
+
+        if doc != ALL_DOCS and not counts.get(doc):
+            if reasons.get(doc) == "ยังไม่ได้สแกน":
+                st.warning(
+                    f"`{engine}` ยังไม่เคยอ่าน **{short_doc(doc, 40)}** — "
+                    "วัดความนิ่งต้องอาศัยผลอ่านเดิมเพื่อหาว่าจุดไหนน่าสงสัย "
+                    "ไปสั่งสแกนเอกสารนี้จากแถบซ้ายก่อน"
+                )
+            else:
+                st.info(
+                    f"**{short_doc(doc, 40)}** สแกนแล้วแต่ไม่พบจุดน่าสงสัยที่ครอปได้ "
+                    "— ไม่ได้แปลว่าอ่านถูกหมด แปลว่าตัวกรองจับอะไรไม่ได้"
+                )
 
         n_points = sum(counts.values()) if doc == ALL_DOCS else counts.get(doc, 0)
         if limit:
@@ -146,7 +180,7 @@ def view_stability(pages: list[PageInfo], results: dict) -> None:
             "เอกสาร",
             [ALL_DOCS] + present,
             key="stab_view_doc",
-            format_func=lambda d: d if d == ALL_DOCS else short_doc(d, 30),
+            format_func=lambda d: d if d == ALL_DOCS else short_doc(d, 34),
         )
         if pick != ALL_DOCS:
             items = [r for r in items if doc_of.get(r["page_id"]) == pick]
