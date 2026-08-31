@@ -24,17 +24,32 @@ from ..config import IMAGE_DIR, RESULTS_DIR, ROOT
 from ..render import PageInfo
 from ..rescue_crop import ZOOM
 from ..thai_text import normalize
+from ..suspect import independent_peers
 from .common import page_label, rescue_crop_uri, short_doc
 from .rescue_view import start_rescue
 from .scan import run_is_active
+
+# รายชื่อที่ independent_peers() ใช้เลือกตัวยืมพิกัด — ต้องเป็นชื่อเต็มรวม +clean
+_ALL_ENGINES = (
+    "typhoon-api", "typhoon-api-num", "typhoon-2b",
+    "tesseract-tha", "easyocr-th", "paddle-th",
+    "typhoon-api+clean", "typhoon-api-num+clean",
+    "tesseract-tha+clean", "easyocr-th+clean", "paddle-th+clean",
+)
 
 # ตัวที่หน้านี้รองรับ — ต้องมี read_variants() และไม่กินการ์ดจอ
 API_ENGINES = ("typhoon-api", "typhoon-api-num", "typhoon-api+clean", "typhoon-api-num+clean")
 
 
 @st.cache_data(show_spinner="กำลังนับจุดที่วัดได้…")
-def _doc_status(engine: str, _pages: list, _results: dict) -> list[tuple[str, int, str]]:
+def _doc_status(
+    engine: str, fingerprint: tuple, _pages: list, _results: dict
+) -> list[tuple[str, int, str]]:
     """สถานะของ *ทุก* เอกสารในคลัง คืน (ชื่อ, จำนวนจุด, เหตุผลถ้าเป็นศูนย์)
+
+    fingerprint ต้องส่งเข้ามาเพราะ _pages กับ _results ขึ้นต้นด้วย _ ซึ่ง
+    Streamlit ไม่เอาไปคิด cache key ให้ เดิม key จึงเป็น engine อย่างเดียว
+    สแกนเอกสารเพิ่มแล้วตัวเลขไม่ขยับ ยังขึ้นว่า "ยังไม่ได้สแกน" ทั้งที่สแกนไปแล้ว
 
     ต้องคืนครบทุกฉบับ ไม่ใช่เฉพาะฉบับที่มีจุด — เดิมกรองฉบับที่ได้ศูนย์ทิ้ง
     ผู้ใช้จึงเห็นตัวเลือกเดียวโดยไม่รู้ว่าอีกสิบฉบับหายไปไหน ทั้งที่เหตุผล
@@ -47,6 +62,7 @@ def _doc_status(engine: str, _pages: list, _results: dict) -> list[tuple[str, in
     """
     import rescue  # นำเข้าตรงนี้เพราะเป็นสคริปต์ระดับราก ไม่ใช่โมดูลในแพ็กเกจ
 
+    del fingerprint  # ใช้เป็น cache key เท่านั้น ไม่ได้เอาไปคำนวณ
     doc_of = {p.page_id: p.doc_name for p in _pages}
     all_docs = sorted({p.doc_name for p in _pages})
     scanned = {
@@ -111,8 +127,14 @@ def start_scan_then_measure(engine: str, doc: str, samples: int) -> bool:
         st.warning("มีตัวรันทำงานอยู่แล้ว ไม่สั่งซ้ำ")
         return False
 
+    # typhoon ไม่คืนพิกัดข้อความเลย ต้องยืมจาก engine ที่คืน และต้องเป็นตัวที่
+    # อ่านภาพชุดเดียวกัน (+clean ยืมจาก +clean เท่านั้น) ถ้าสแกนแต่ typhoon
+    # ตัวเดียวจะไม่มีพิกัดให้ครอป แล้วได้ "ไม่มีจุดน่าสงสัยที่ครอปได้" ทุกครั้ง
     base = engine.split("+")[0]
-    scan = [sys.executable, str(ROOT / "run_bench.py"), "-e", base, "--doc", doc]
+    peers = [p.split("+")[0] for p in independent_peers(engine, list(_ALL_ENGINES))]
+    scan = [sys.executable, str(ROOT / "run_bench.py"), "--doc", doc]
+    for name in [base, *dict.fromkeys(peers)]:
+        scan += ["-e", name]
     if "+clean" in engine:
         scan.append("--clean")
     measure = [
@@ -153,7 +175,12 @@ def _run_panel(pages: list[PageInfo], results: dict) -> None:
 
         # ต้องเลือกเอกสารได้ ไม่งั้นเหลือแค่ --limit ซึ่งตัดจากหัวรายการที่เรียง
         # ตาม page_id เอกสารท้าย ๆ จึงไม่มีวันถูกวัดเลย
-        docs = _doc_status(engine, pages, results)
+        # นับจำนวนหน้าที่อ่านสำเร็จของทุก engine เป็นลายนิ้วมือ — สแกนเพิ่มเมื่อไร
+        # ตัวเลขนี้เปลี่ยน cache จึงคำนวณใหม่ ไม่ค้างอยู่กับสถานะเก่า
+        fingerprint = tuple(
+            (n, sum(1 for pg in per.values() if pg.ok)) for n, per in sorted(results.items())
+        )
+        docs = _doc_status(engine, fingerprint, pages, results)
         counts = {d: n for d, n, _ in docs}
         reasons = {d: why for d, _, why in docs}
         doc = c2.selectbox(
