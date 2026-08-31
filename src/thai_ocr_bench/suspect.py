@@ -322,7 +322,7 @@ def find_in_line(
 def engine_family(name: str) -> str:
     """ชื่อตระกูลของ engine — ส่วนหน้าสุดก่อนขีดแรก
 
-    typhoon-api, typhoon-api-num, typhoon-2b ล้วนเป็นโมเดลเดียวกัน
+    typhoon-api กับ typhoon-api-num ล้วนเป็นโมเดลเดียวกัน
     ต่างกันแค่คำสั่งหรือวิธีเรียก จึงอ่านผิดแบบเดียวกัน
     ถ้าปล่อยให้โหวตกันเองจะได้สองเสียงจากความเห็นเดียว
     """

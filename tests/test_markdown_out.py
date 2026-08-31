@@ -20,7 +20,7 @@ PAGES = [
 class TestBuild:
     def test_keeps_engine_markdown_untouched(self):
         """Typhoon คืนหัวข้อมาเป็น ## อยู่แล้ว ห้ามไปตัดหรือแปลงเพิ่ม"""
-        md = markdown_out.build("เอกสาร", "typhoon-2b", PAGES)
+        md = markdown_out.build("เอกสาร", "typhoon-api-num", PAGES)
         assert "## กรมทะเบียนที่ดิน" in md
 
     def test_page_markers_are_invisible_comments_not_headings(self):

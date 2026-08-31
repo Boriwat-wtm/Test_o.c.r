@@ -46,7 +46,7 @@ def report_path_for(engine: str) -> Path:
     """แฟ้มผลแยกตาม engine — rescue.json เดิมเก็บได้ทีละตัวเท่านั้น
 
     รัน engine ที่สองทับตัวแรกแล้วผลตัวแรกหายทันที ซึ่งเจอจริงตอนจะเทียบ
-    ความนิ่งของ typhoon-2b กับ typhoon-api ยังเขียน rescue.json ต่อไปด้วย
+    ความนิ่งของ typhoon-api หลายชุดค่า ยังเขียน rescue.json ต่อไปด้วย
     เพราะแท็บเดิมอ่านไฟล์นั้นอยู่ ให้หมายถึง "รอบล่าสุด"
     """
     safe = engine.replace("+", "_").replace("/", "_")
@@ -161,7 +161,7 @@ def main() -> None:
         f"(ครอปทีละบรรทัดจาก {img_dir.name}/ แล้วขยาย {ZOOM} เท่า)\n"
     )
 
-    # read_variants() มีเฉพาะตระกูล typhoon (ทั้ง typhoon-2b ในเครื่องและฝั่ง API)
+    # read_variants() มีเฉพาะตระกูล typhoon-api
     # ซึ่งควบคุมค่า sampling ตอนสร้างคำตอบได้ engine อื่นอ่านรอบเดียวเสมอ
     # ไม่ว่าเรียกกี่ครั้ง ขอ --samples ไปก็ไม่มีความหมาย
     use_variants = args.samples > 1 and hasattr(engine, "read_variants")

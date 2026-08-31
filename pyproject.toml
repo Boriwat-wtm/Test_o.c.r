@@ -29,7 +29,7 @@ rapid = ["rapidocr>=3.9.2", "onnxruntime>=1.20"]
 # temperature/top_p ที่ ocr_document() ตรึงไว้ ถ้าวันหนึ่ง typhoon-ocr
 # เลิกใช้ openai โค้ดเราจะพังทันทีโดยที่ uv sync ไม่เตือนอะไรเลย
 typhoon = ["typhoon-ocr>=0.4.1", "openai>=1.0"]
-# ThaiTrOCR กับ typhoon-2b โหลดโมเดลผ่าน transformers และต้องมี torch
+# ThaiTrOCR โหลดโมเดลผ่าน transformers และต้องมี torch
 # accelerate จำเป็นเพราะโค้ดใช้ device_map="cuda:0" ซึ่ง transformers บังคับให้มี
 # ถ้าขาด engine จะรายงานว่าพร้อมใช้แล้วไปพังตอนโหลดโมเดลทุกหน้า
 trocr = ["transformers>=5.0", "torch>=2.8", "accelerate>=1.0"]
@@ -55,7 +55,7 @@ dev = ["pytest>=8.0"]
 
 # torch ต้องดึงจาก index ของ PyTorch ไม่ใช่ PyPI
 # ถ้าประกาศแค่ "torch>=2.8" เฉย ๆ PyPI จะให้ wheel ตัว CPU บน Windows เสมอ
-# แล้ว typhoon-2b กับ thai-trocr จะรายงานว่า "ต้องมี GPU" ทั้งที่เครื่องมีการ์ดอยู่
+# แล้ว thai-trocr จะรายงานว่า "ต้องมี GPU" ทั้งที่เครื่องมีการ์ดอยู่
 # ส่วน easyocr กับ paddle จะรันได้แต่ตกไปใช้ CPU ซึ่งช้ากว่ามาก
 # เคยเจอมาแล้วรอบหนึ่ง: uv sync ลง 2.13.0+cpu ทับ 2.8.0+cu129 ที่ใช้อยู่
 #

@@ -34,7 +34,7 @@ from .theme import pill
 
 # รายชื่อที่ independent_peers() ใช้เลือกตัวยืมพิกัด — ต้องเป็นชื่อเต็มรวม +clean
 _ALL_ENGINES = (
-    "typhoon-api", "typhoon-api-num", "typhoon-2b",
+    "typhoon-api", "typhoon-api-num",
     "tesseract-tha", "easyocr-th", "paddle-th",
     "typhoon-api+clean", "typhoon-api-num+clean",
     "tesseract-tha+clean", "easyocr-th+clean", "paddle-th+clean",

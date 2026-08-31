@@ -60,7 +60,6 @@ uv pip install -e .
 | `paddle-th-server` | ตัวเดิม + ตัวตรวจจับ `PP-OCRv5_server_det` | ตีกรอบดีกว่ามาก แต่ช้ากว่า ๑๕ เท่า (~๙ นาที/หน้า) |
 | `easyocr-th` | `thai_g1` | **ตัวคุม** — charset ไม่มี `๐` |
 | `surya` | Surya OCR | ยังใช้ไม่ได้ — ชนกับ transformers 5.x ที่ Typhoon ต้องใช้ |
-| `typhoon-2b` | `typhoon-ai/typhoon-ocr1.5-2b` | VLM รันในเครื่อง · ย่อภาพเหลือ 1536 px เพราะ VRAM 6 GB |
 | `typhoon-api` | `typhoon-ocr` ผ่าน opentyphoon.ai | รุ่น 2B ตัวเดียวกับข้างบน แต่ไม่กิน VRAM · ส่งเอกสารออกนอกเครื่อง |
 | `typhoon-api-num` | ตัวเดิม + กำชับเรื่องเลขไทยในคำสั่ง | แยกเป็นคนละตัวเพื่อวัดว่าการกำชับช่วยจริงไหม |
 | `thai-trocr` | `kkatiz/thai-trocr-thaigov-v2` | เทรนบน ThaiGov V2 Corpus · ต้องยืมตัวตรวจจับของ Paddle |
