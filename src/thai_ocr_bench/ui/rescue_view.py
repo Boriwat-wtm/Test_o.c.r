@@ -14,7 +14,9 @@ from ..render import PageInfo
 from ..rescue_crop import ZOOM
 from .common import page_label, rescue_crop_uri
 
-def start_rescue(engine: str, limit: int | None, samples: int = 1) -> None:
+def start_rescue(
+    engine: str, limit: int | None, samples: int = 1, doc: str | None = None
+) -> None:
     """สั่ง rescue.py เป็นคนละโปรเซส แบบเดียวกับปุ่มสแกน
 
     ต้องแยกโปรเซสเพราะการอ่านซ้ำยิง API ทีละจุดโดยมี throttle 3.1 วินาที
@@ -25,6 +27,8 @@ def start_rescue(engine: str, limit: int | None, samples: int = 1) -> None:
         cmd += ["--limit", str(limit)]
     if samples > 1:
         cmd += ["--samples", str(samples)]
+    if doc:
+        cmd += ["--doc", doc]
 
     log = RESULTS_DIR / "rescue.log"
     log.parent.mkdir(parents=True, exist_ok=True)

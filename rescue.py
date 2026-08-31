@@ -35,6 +35,7 @@ from thai_ocr_bench.suspect import (
     scan_page,
     thai_digit_by_document,
 )
+from thai_ocr_bench.render import load_pages
 from thai_ocr_bench.thai_text import normalize
 from thai_ocr_bench.truth import find_repeating_lines
 
@@ -104,6 +105,12 @@ def main() -> None:
     parser.add_argument("--engine", required=True, help="engine ที่จะให้อ่านซ้ำ")
     parser.add_argument("--limit", type=int, help="จำกัดจำนวนจุด (ไว้ลองก่อน)")
     parser.add_argument(
+        "--doc",
+        action="append",
+        help="เจาะเฉพาะเอกสารชื่อนี้ (ใส่ซ้ำได้) — --limit ตัดจากหัวรายการ "
+        "ซึ่งเรียงตาม page_id จึงได้แต่เอกสารแรก ๆ เอกสารท้าย ๆ ไม่เคยถูกแตะ",
+    )
+    parser.add_argument(
         "--samples",
         type=int,
         default=1,
@@ -127,6 +134,21 @@ def main() -> None:
         raise SystemExit(f"{base} ยังใช้ไม่ได้: {why}")
 
     suspects = collect_suspects(results, args.engine)
+    if args.doc:
+        wanted = set(args.doc)
+        by_page = {p.page_id: p.doc_name for p in load_pages()}
+        unknown = wanted - set(by_page.values())
+        if unknown:
+            raise SystemExit(
+                "ไม่รู้จักเอกสาร: "
+                + ", ".join(sorted(unknown))
+                + " · ที่มีให้เลือก: "
+                + ", ".join(sorted(set(by_page.values())))
+            )
+        suspects = [s for s in suspects if by_page.get(s.page_id) in wanted]
+        if not suspects:
+            print("เอกสารที่เลือกไม่มีจุดน่าสงสัยที่ครอปได้")
+            return
     if args.limit:
         suspects = suspects[: args.limit]
     if not suspects:

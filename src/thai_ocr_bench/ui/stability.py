@@ -21,11 +21,32 @@ from ..config import IMAGE_DIR, RESULTS_DIR
 from ..render import PageInfo
 from ..rescue_crop import ZOOM
 from ..thai_text import normalize
-from .common import page_label, rescue_crop_uri
+from .common import page_label, rescue_crop_uri, short_doc
 from .rescue_view import start_rescue
 
 # ตัวที่หน้านี้รองรับ — ต้องมี read_variants() และไม่กินการ์ดจอ
 API_ENGINES = ("typhoon-api", "typhoon-api-num", "typhoon-api+clean", "typhoon-api-num+clean")
+
+
+@st.cache_data(show_spinner="กำลังนับจุดที่วัดได้…")
+def _docs_with_points(engine: str, _pages: list, _results: dict) -> list[tuple[str, int]]:
+    """นับจุดที่ครอปได้ แยกตามเอกสาร — ให้เห็นก่อนกดว่าจะยิง API กี่ครั้ง
+
+    เรียก collect_suspects ของ rescue.py ตัวเดียวกับที่ตัวรันใช้ ไม่เขียนซ้ำ
+    ไม่งั้นตัวเลขที่โชว์กับที่รันจริงจะไม่ตรงกัน
+    """
+    import rescue  # นำเข้าตรงนี้เพราะเป็นสคริปต์ระดับราก ไม่ใช่โมดูลในแพ็กเกจ
+
+    doc_of = {p.page_id: p.doc_name for p in _pages}
+    counts: dict[str, int] = {}
+    try:
+        for s in rescue.collect_suspects(_results, engine):
+            d = doc_of.get(s.page_id)
+            if d:
+                counts[d] = counts.get(d, 0) + 1
+    except (KeyError, ValueError):
+        return []
+    return sorted(counts.items(), key=lambda kv: -kv[1])
 
 
 def _load(engine: str) -> list[dict]:
@@ -49,25 +70,57 @@ def _diff_summary(variants: list[str]) -> str:
     return f"{len(variants)} รอบ ได้ {len(forms)} แบบ"
 
 
-def _run_panel() -> None:
+ALL_DOCS = "ทุกเอกสาร"
+
+
+def _run_panel(pages: list[PageInfo], results: dict) -> None:
     """ปุ่มสั่งรัน — วางไว้บนสุดเพราะหน้านี้ว่างเปล่าจนกว่าจะรัน"""
     with st.expander("สั่งวัดความนิ่ง", expanded=False):
-        c1, c2, c3 = st.columns([2, 1, 1])
+        c1, c2 = st.columns([2, 2])
         engine = c1.selectbox("engine", API_ENGINES, key="stab_engine")
-        samples = c2.number_input(
+
+        # ต้องเลือกเอกสารได้ ไม่งั้นเหลือแค่ --limit ซึ่งตัดจากหัวรายการที่เรียง
+        # ตาม page_id เอกสารท้าย ๆ จึงไม่มีวันถูกวัดเลย
+        docs = _docs_with_points(engine, pages, results)
+        options = [ALL_DOCS] + [d for d, _ in docs]
+        counts = {d: n for d, n in docs}
+        doc = c2.selectbox(
+            "เอกสาร",
+            options,
+            key="stab_doc",
+            format_func=lambda d: (
+                f"{ALL_DOCS} ({sum(counts.values())} จุด)" if d == ALL_DOCS
+                else f"{short_doc(d, 30)} ({counts[d]} จุด)"
+            ),
+            help="นับเฉพาะจุดที่ครอปได้ — บางจุดมาจากกฎที่ดูทั้งเอกสาร ไม่ผูกกับพิกัด",
+        )
+
+        d1, d2 = st.columns(2)
+        samples = d1.number_input(
             "อ่านกี่รอบ", min_value=2, max_value=7, value=3, key="stab_n",
             help="ยิ่งมากยิ่งจับความไม่นิ่งได้ละเอียด แต่กินโควตา API เป็นเท่าตัว",
         )
-        limit = c3.number_input(
+        limit = d2.number_input(
             "จำกัดกี่จุด", min_value=0, max_value=500, value=0, step=10, key="stab_lim",
-            help="0 = ทุกจุด · ใส่เลขไว้ตอนอยากลองก่อน",
+            help="0 = ทุกจุดของเอกสารที่เลือก · ใส่เลขไว้ตอนอยากลองก่อน",
         )
+
+        n_points = sum(counts.values()) if doc == ALL_DOCS else counts.get(doc, 0)
+        if limit:
+            n_points = min(n_points, int(limit))
+        calls = n_points * int(samples)
         st.caption(
-            f"ยิง API ประมาณ (จำนวนจุด × {samples}) ครั้ง มี throttle 3.1 วินาทีต่อครั้ง "
-            "ตัวรันแยกโปรเซส ปิดหน้านี้ระหว่างรันได้"
+            f"จะยิง API {calls} ครั้ง ({n_points} จุด × {samples} รอบ) "
+            f"ใช้เวลาราว {calls * 3.1 / 60:.0f} นาที เพราะมี throttle 3.1 วินาทีต่อครั้ง "
+            "· ตัวรันแยกโปรเซส ปิดหน้านี้ระหว่างรันได้"
         )
-        if st.button("เริ่มวัด", type="primary", key="stab_go"):
-            start_rescue(engine, int(limit) or None, samples=int(samples))
+        if st.button("เริ่มวัด", type="primary", key="stab_go", disabled=not n_points):
+            start_rescue(
+                engine,
+                int(limit) or None,
+                samples=int(samples),
+                doc=None if doc == ALL_DOCS else doc,
+            )
             st.success("สั่งรันแล้ว — กดปุ่มโหลดผลใหม่ด้านล่างเป็นระยะ")
 
 
@@ -78,10 +131,25 @@ def view_stability(pages: list[PageInfo], results: dict) -> None:
         "รอบที่ตอบไม่ตรงกันคือจุดที่ engine เองก็ไม่มั่นใจ ควรให้คนดูภาพ"
     )
 
-    _run_panel()
+    _run_panel(pages, results)
 
-    engine = st.selectbox("ดูผลของ", API_ENGINES, key="stab_view")
+    view = st.columns([2, 2])
+    engine = view[0].selectbox("ดูผลของ", API_ENGINES, key="stab_view")
     items = _load(engine)
+
+    # กรองผลตามเอกสารด้วย ไม่ใช่แค่ตอนสั่งรัน — รันทีเดียวหลายเอกสารแล้วอยาก
+    # ดูทีละฉบับเป็นเรื่องปกติ และแต่ละฉบับมีลักษณะความไม่นิ่งคนละแบบ
+    doc_of = {p.page_id: p.doc_name for p in pages}
+    if items:
+        present = sorted({doc_of.get(r["page_id"], "?") for r in items})
+        pick = view[1].selectbox(
+            "เอกสาร",
+            [ALL_DOCS] + present,
+            key="stab_view_doc",
+            format_func=lambda d: d if d == ALL_DOCS else short_doc(d, 30),
+        )
+        if pick != ALL_DOCS:
+            items = [r for r in items if doc_of.get(r["page_id"]) == pick]
 
     if not items:
         st.info(
