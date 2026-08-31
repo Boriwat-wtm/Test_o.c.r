@@ -190,6 +190,31 @@ def rescue_crop_uri(path: str, box: tuple[int, int, int, int]) -> str | None:
     return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+@st.cache_data(show_spinner=False, max_entries=2048)
+def peek_uri(path: str, box: tuple[int, int, int, int], mtime: float) -> str | None:
+    """ภาพครอปขนาดเล็กสำหรับโชว์ตอนชี้เมาส์
+
+    ต่างจาก rescue_crop_uri ที่ขยาย 4 เท่าเพื่อให้ตรงกับภาพที่ engine อ่านจริง
+    ตัวนี้ไม่ต้องตรงกับอะไร แค่ให้คนเห็นว่าตรงนั้นเขียนอะไร จึงย่อลงมากได้
+    ต้องเล็กเพราะฝังลงหน้าเว็บทุกบรรทัดที่ mark — วัดแล้วแบบ 4 เท่ากิน 30 KB
+    ต่อบรรทัด หน้าที่มี 20 จุดจะกลายเป็น 600 KB ในหน้าเดียว
+
+    mtime รับมาเป็น cache key เฉย ๆ ภาพเปลี่ยนแล้วต้องคำนวณใหม่
+    """
+    import base64
+    import io
+
+    del mtime
+    piece = crop_region(Path(path), box)
+    if piece is None:
+        return None
+    if piece.width > 900:
+        piece = piece.resize((900, max(1, round(piece.height * 900 / piece.width))))
+    buf = io.BytesIO()
+    piece.save(buf, format="WEBP", quality=72)
+    return "data:image/webp;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
 def image_dir_for(engine: str) -> Path:
     """engine ที่ลงท้าย +clean อ่านจากภาพที่ลบลายน้ำแล้ว พิกัดจึงอิงภาพชุดนั้น"""
     return CLEAN_IMAGE_DIR if engine.endswith("+clean") else IMAGE_DIR

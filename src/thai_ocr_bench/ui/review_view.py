@@ -21,7 +21,7 @@ from ..config import CLEAN_IMAGE_DIR, IMAGE_DIR, RESULTS_DIR
 from ..render import PageInfo
 from ..suspect import thai_digit_by_document
 from ..thai_text import THAI_DIGITS
-from .common import cached_image, rescue_crop_uri, short_doc
+from .common import cached_image, peek_uri, short_doc
 
 # ตัวที่คืนพิกัดข้อความ เรียงตามความน่าเชื่อถือของกรอบที่วัดมา
 _DONORS = ("tesseract-tha", "paddle-th", "easyocr-th")
@@ -58,6 +58,18 @@ CSS = """
 .stu-gut{font-family:ui-monospace,monospace;font-size:11px;color:#8C919E;
   min-width:2.2em;text-align:right;flex:none;user-select:none}
 .stu-txt{font-size:15.5px;line-height:1.95;word-break:break-word;flex:1}
+
+/* ภาพครอปเด้งตอนชี้เมาส์ที่ช่วงที่ mark — เร็วกว่าเลือกบรรทัดจาก dropdown
+   ใช้ CSS ล้วน ไม่ง้อ JS เพราะ Streamlit ตัด script ที่ฝังมากับ markdown ทิ้ง */
+.stu-peek{position:relative}
+.stu-peek>.pk{display:none;position:absolute;left:0;bottom:calc(100% + 10px);
+  z-index:60;padding:.35rem;background:#fff;border:1px solid #CFD3DD;
+  border-radius:.5rem;box-shadow:0 8px 26px rgba(20,22,27,.16);
+  width:min(560px,78vw)}
+.stu-peek>.pk img{display:block;width:100%;border-radius:.3rem}
+.stu-peek>.pk .cap{font-size:11px;color:#5B5F6B;padding:.25rem .1rem 0}
+.stu-peek:hover>.pk{display:block}
+.stu-doc{overflow:visible}
 </style>
 """
 
@@ -136,7 +148,7 @@ def _overlay(uri: str, w: int, h: int, rows: list) -> str:
     )
 
 
-def _inline(row: review.ReviewLine) -> str:
+def _inline(row: review.ReviewLine, peek: str | None = None) -> str:
     """ระบายสีเฉพาะช่วงที่ต้องดู ส่วนที่เหลือปล่อยไว้
 
     ความไม่นิ่งครอบทั้งบรรทัด จึงวาดเป็นพื้นหลังจาง แล้ววาดตัวเลขทับ
@@ -152,10 +164,19 @@ def _inline(row: review.ReviewLine) -> str:
         tip = m.note
         if (fix := suggest(m, row.text)):
             tip += f" · น่าจะเป็น {fix}"
-        body.append(
+        chunk = (
             f'<span class="{cls}" data-tip="{html.escape(tip)}">'
             f"{html.escape(row.text[m.start : m.end])}</span>"
         )
+        if peek:
+            # ห่อทีละช่วง ไม่ใช่ทั้งบรรทัด — ชี้ตรงตัวเลขแล้วเด้ง ไม่ใช่ชี้ตรงไหน
+            # ในบรรทัดก็เด้ง ซึ่งจะบังข้อความรอบ ๆ ตลอดเวลาที่เลื่อนเมาส์ผ่าน
+            chunk = (
+                f'<span class="stu-peek">{chunk}'
+                f'<span class="pk"><img src="{peek}" alt="ภาพบรรทัดนี้">'
+                f'<span class="cap">บรรทัด {row.index + 1} จากภาพจริง</span></span></span>'
+            )
+        body.append(chunk)
         cursor = m.end
     body.append(html.escape(row.text[cursor:]))
 
@@ -311,14 +332,21 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
         st.success("ไม่มีบรรทัดไหนต้องตรวจ — ไม่ได้แปลว่าอ่านถูกหมด")
         return
 
+    mtime = img.stat().st_mtime if img.exists() else 0.0
     body = []
     for r in shown:
         cls = "stu-row hit" if r.needs_check else "stu-row"
+        peek = (
+            peek_uri(str(img), tuple(r.box), mtime)
+            if r.needs_check and r.box and img.exists()
+            else None
+        )
         body.append(
             f'<div class="{cls}"><span class="stu-gut">{r.index + 1}</span>'
-            f'<span class="stu-txt">{_inline(r)}</span></div>'
+            f'<span class="stu-txt">{_inline(r, peek)}</span></div>'
         )
     st.markdown(f'<div class="stu-doc">{"".join(body)}</div>', unsafe_allow_html=True)
+    st.caption("ชี้เมาส์ที่ช่วงที่ระบายสีเพื่อดูภาพจริงตรงจุดนั้น")
 
     # คำแนะนำรวมไว้ที่เดียวใต้กล่อง ไม่แทรกคั่นกลางข้อความ
     hints = [
@@ -330,24 +358,6 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
     if hints:
         st.caption("แก้ได้เลยโดยไม่ต้องดูภาพ — " + " · ".join(hints[:6]))
 
-    pick = [r for r in shown if r.needs_check and r.box]
-    if pick:
-        c = st.columns([1.6, 2.4])
-        at = c[0].selectbox(
-            "ดูภาพบรรทัด",
-            [r.index for r in pick],
-            format_func=lambda i: f"บรรทัด {i + 1}",
-            key=f"rv_crop|{picked.page_id}",
-            label_visibility="collapsed",
-        )
-        row = next(r for r in pick if r.index == at)
-        crop = rescue_crop_uri(str(img), tuple(row.box))
-        if crop:
-            st.markdown(
-                f'<img src="{crop}" style="width:100%;border-radius:.4rem;'
-                f'border:1px solid var(--border)">',
-                unsafe_allow_html=True,
-            )
     if s["with_box"] < s["lines"]:
         st.caption(
             f"ยืมพิกัดได้ {s['with_box']}/{s['lines']} บรรทัด — "
