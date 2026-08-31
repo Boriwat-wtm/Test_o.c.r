@@ -59,17 +59,20 @@ CSS = """
   min-width:2.2em;text-align:right;flex:none;user-select:none}
 .stu-txt{font-size:15.5px;line-height:1.95;word-break:break-word;flex:1}
 
-/* ภาพครอปเด้งตอนชี้เมาส์ที่ช่วงที่ mark — เร็วกว่าเลือกบรรทัดจาก dropdown
+/* ภาพครอปเด้งตอนชี้เมาส์ที่บรรทัดไหนก็ได้ ไม่ต้องเล็งตัวเลข
+   วางไว้ติดขอบบนของกล่อง ไม่ใช่ลอยเหนือบรรทัดที่ชี้ — ถ้าลอยตามบรรทัด
+   มันจะบังข้อความรอบ ๆ ตลอดเวลาที่เลื่อนเมาส์ผ่าน ซึ่งขัดการกวาดตาอ่าน
    ใช้ CSS ล้วน ไม่ง้อ JS เพราะ Streamlit ตัด script ที่ฝังมากับ markdown ทิ้ง */
-.stu-peek{position:relative}
-.stu-peek>.pk{display:none;position:absolute;left:0;bottom:calc(100% + 10px);
-  z-index:60;padding:.35rem;background:#fff;border:1px solid #CFD3DD;
-  border-radius:.5rem;box-shadow:0 8px 26px rgba(20,22,27,.16);
-  width:min(560px,78vw)}
-.stu-peek>.pk img{display:block;width:100%;border-radius:.3rem}
-.stu-peek>.pk .cap{font-size:11px;color:#5B5F6B;padding:.25rem .1rem 0}
-.stu-peek:hover>.pk{display:block}
-.stu-doc{overflow:visible}
+.stu-doc{position:relative}
+.stu-peek{position:absolute;left:.6rem;right:.6rem;top:.5rem;z-index:60;
+  display:none;padding:.4rem;background:#fff;border:1px solid #CFD3DD;
+  border-radius:.5rem;box-shadow:0 10px 30px rgba(20,22,27,.18)}
+.stu-peek img{display:block;width:100%;border-radius:.3rem}
+.stu-peek .cap{font-family:ui-monospace,monospace;font-size:11px;
+  color:#5B5F6B;padding:.3rem .1rem 0}
+.stu-row:hover>.stu-peek{display:block}
+.stu-row.hit:hover{background:rgba(79,70,229,.10)}
+.stu-row:hover{background:rgba(20,22,27,.04);border-radius:.3rem}
 </style>
 """
 
@@ -148,7 +151,7 @@ def _overlay(uri: str, w: int, h: int, rows: list) -> str:
     )
 
 
-def _inline(row: review.ReviewLine, peek: str | None = None) -> str:
+def _inline(row: review.ReviewLine) -> str:
     """ระบายสีเฉพาะช่วงที่ต้องดู ส่วนที่เหลือปล่อยไว้
 
     ความไม่นิ่งครอบทั้งบรรทัด จึงวาดเป็นพื้นหลังจาง แล้ววาดตัวเลขทับ
@@ -164,19 +167,10 @@ def _inline(row: review.ReviewLine, peek: str | None = None) -> str:
         tip = m.note
         if (fix := suggest(m, row.text)):
             tip += f" · น่าจะเป็น {fix}"
-        chunk = (
+        body.append(
             f'<span class="{cls}" data-tip="{html.escape(tip)}">'
             f"{html.escape(row.text[m.start : m.end])}</span>"
         )
-        if peek:
-            # ห่อทีละช่วง ไม่ใช่ทั้งบรรทัด — ชี้ตรงตัวเลขแล้วเด้ง ไม่ใช่ชี้ตรงไหน
-            # ในบรรทัดก็เด้ง ซึ่งจะบังข้อความรอบ ๆ ตลอดเวลาที่เลื่อนเมาส์ผ่าน
-            chunk = (
-                f'<span class="stu-peek">{chunk}'
-                f'<span class="pk"><img src="{peek}" alt="ภาพบรรทัดนี้">'
-                f'<span class="cap">บรรทัด {row.index + 1} จากภาพจริง</span></span></span>'
-            )
-        body.append(chunk)
         cursor = m.end
     body.append(html.escape(row.text[cursor:]))
 
@@ -336,17 +330,20 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
     body = []
     for r in shown:
         cls = "stu-row hit" if r.needs_check else "stu-row"
-        peek = (
-            peek_uri(str(img), tuple(r.box), mtime)
-            if r.needs_check and r.box and img.exists()
-            else None
+        # ทำภาพให้ทุกบรรทัดที่มีพิกัด ไม่ใช่เฉพาะที่ mark — คนตรวจอาจสงสัย
+        # บรรทัดที่ระบบไม่ได้ชี้ก็ได้ วัดแล้วหน้าที่ใหญ่สุดโตจาก 108 เป็น 162 KB
+        peek = peek_uri(str(img), tuple(r.box), mtime) if r.box and img.exists() else None
+        shot = (
+            f'<span class="stu-peek"><img src="{peek}" alt="ภาพบรรทัดนี้">'
+            f'<span class="cap">บรรทัด {r.index + 1} จากภาพจริง</span></span>'
+            if peek else ""
         )
         body.append(
-            f'<div class="{cls}"><span class="stu-gut">{r.index + 1}</span>'
-            f'<span class="stu-txt">{_inline(r, peek)}</span></div>'
+            f'<div class="{cls}">{shot}<span class="stu-gut">{r.index + 1}</span>'
+            f'<span class="stu-txt">{_inline(r)}</span></div>'
         )
     st.markdown(f'<div class="stu-doc">{"".join(body)}</div>', unsafe_allow_html=True)
-    st.caption("ชี้เมาส์ที่ช่วงที่ระบายสีเพื่อดูภาพจริงตรงจุดนั้น")
+    st.caption("ชี้เมาส์ที่บรรทัดไหนก็ได้ เพื่อดูภาพจริงของบรรทัดนั้น")
 
     # คำแนะนำรวมไว้ที่เดียวใต้กล่อง ไม่แทรกคั่นกลางข้อความ
     hints = [
