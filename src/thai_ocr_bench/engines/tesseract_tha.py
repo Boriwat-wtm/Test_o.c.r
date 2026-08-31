@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -16,6 +17,9 @@ from PIL import Image
 from ..config import TESSDATA_DIR, TESSERACT_EXE
 from .base import Engine, OcrLine, register
 
+# ช่วงอักษรไทยทั้งบล็อกใน Unicode — พยัญชนะ สระ วรรณยุกต์ และเลขไทย
+_THAI = re.compile(r"[฀-๿]")
+
 
 class TesseractThai(Engine):
     name = "tesseract-tha"
@@ -24,6 +28,8 @@ class TesseractThai(Engine):
 
     # --psm 6 = ถือว่าทั้งภาพเป็นบล็อกข้อความเดียว เหมาะกับเอกสารคอลัมน์เดียว
     config = "--oem 1 --psm 6"
+    # ภาษาที่ส่งให้ Tesseract — คลาสลูกเปลี่ยนได้
+    langs = ("tha+eng",)
 
     def available(self) -> tuple[bool, str]:
         if not TESSERACT_EXE.exists():
@@ -44,15 +50,14 @@ class TesseractThai(Engine):
             # 'ม ิ ต ิ ด ้ า น' ส่วน image_to_string ใช้ตรรกะเว้นวรรคของ Tesseract เอง
             # จึงได้ 'มิติด้าน' ที่ถูกต้อง — ใช้ image_to_data แค่เอากรอบกับ confidence
             started = time.perf_counter()
-            raw_text = pytesseract.image_to_string(
-                image, lang="tha+eng", config=self.config
-            )
+            raw_text, lang = self._best_read(image)
             core_ms = (time.perf_counter() - started) * 1000
 
             # รอบที่สองมีไว้ให้หน้าเว็บชี้ตำแหน่งได้ ไม่นับเป็นเวลาใช้งานจริง
+            # ต้องใช้ lang เดียวกับที่ชนะ ไม่งั้นกรอบไม่ตรงกับข้อความ
             data = pytesseract.image_to_data(
                 image,
-                lang="tha+eng",
+                lang=lang,
                 config=self.config,
                 output_type=pytesseract.Output.DICT,
             )
@@ -72,6 +77,28 @@ class TesseractThai(Engine):
             for i, text in enumerate(text_lines)
         ]
         return lines, core_ms
+
+    def _best_read(self, image: Image.Image) -> tuple[str, str]:
+        """อ่านด้วยทุกภาษาใน self.langs แล้วเลือกอันที่ได้ตัวอักษรไทยมากที่สุด
+
+        ทำไมต้องเลือก — Tesseract ตัดสินภาษาทั้งหน้าเป็นก้อนเดียว พอเปิด eng
+        ไว้ด้วยแล้วเจอสแกนไม่ชัด มันเลือกตีความทั้งหน้าเป็นอังกฤษ
+        วัดจริงกับหน้าที่แย่ที่สุดในคลัง (doccd6551_p009)
+          tha+eng  ได้ตัวอักษรไทย     7 ตัว · บรรทัดขยะ 86%
+          tha      ได้ตัวอักษรไทย   993 ตัว · บรรทัดขยะ 37%
+        แต่จะตัด eng ทิ้งเลยก็ไม่ได้ เพราะบางเอกสารมีอังกฤษจริง
+        (เช่น "Operation Objectives") จึงอ่านทั้งสองแบบแล้วให้ผลตัดสินเอง
+
+        เกณฑ์คือจำนวนตัวอักษรไทย ไม่ใช่ความยาวข้อความ เพราะรอบที่หลงไป
+        ทางอังกฤษได้ข้อความยาวพอกันแต่เป็นขยะเกือบทั้งหมด
+        """
+        best_text, best_lang, best_score = "", self.langs[0], -1
+        for lang in self.langs:
+            text = pytesseract.image_to_string(image, lang=lang, config=self.config)
+            score = len(_THAI.findall(text))
+            if score > best_score:
+                best_text, best_lang, best_score = text, lang, score
+        return best_text, best_lang
 
     @staticmethod
     def _line_boxes(data: dict) -> list[tuple[float | None, tuple[int, int, int, int]]]:
@@ -106,4 +133,20 @@ class TesseractThai(Engine):
         return out
 
 
+class TesseractThaiAuto(TesseractThai):
+    """อ่านสองรอบ (ไทยล้วน กับ ไทย+อังกฤษ) แล้วเลือกรอบที่ได้ภาษาไทยมากกว่า
+
+    แยกเป็นคนละ engine กับตัวเดิม ไม่ใช่แก้ทับ เพื่อให้วัดเทียบกันได้ว่า
+    ช่วยจริงไหม ซึ่งเป็นหน้าที่ของเครื่องมือนี้ตั้งแต่แรก
+
+    ราคาที่จ่ายคือเวลาเป็นสองเท่า แต่ Tesseract อ่านหน้าละ 1.8 วินาที
+    สองรอบยังเร็วกว่า paddle-th รอบเดียว (45.6 วินาที) หลายเท่า
+    """
+
+    name = "tesseract-tha-auto"
+    label = "Tesseract 5 (เลือกภาษาเอง)"
+    langs = ("tha", "tha+eng")
+
+
 register(TesseractThai())
+register(TesseractThaiAuto())

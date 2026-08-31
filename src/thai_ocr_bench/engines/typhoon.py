@@ -115,7 +115,7 @@ class TyphoonOcr(Engine):
             ).to(self._model.device)
 
     def read_variants(
-        self, image_path: Path, *, n: int = 3, temperature: float = 0.7
+        self, image_path: Path, *, n: int = 3, temperature: float = 0.3
     ) -> list[str]:
         """อ่านภาพเดิมซ้ำ n รอบแบบสุ่ม (ไม่ใช่ greedy) คืนข้อความทุกรอบ
 

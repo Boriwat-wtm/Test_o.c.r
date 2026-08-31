@@ -13,11 +13,13 @@
 
 from __future__ import annotations
 
+import html
 import json
 import subprocess
 import sys
 
 import streamlit as st
+from rapidfuzz.distance import Levenshtein
 
 from .. import history, progress
 from ..config import IMAGE_DIR, RESULTS_DIR, ROOT
@@ -28,6 +30,7 @@ from ..suspect import independent_peers
 from .common import page_label, rescue_crop_uri, short_doc
 from .rescue_view import start_rescue
 from .scan import run_is_active
+from .theme import pill
 
 # รายชื่อที่ independent_peers() ใช้เลือกตัวยืมพิกัด — ต้องเป็นชื่อเต็มรวม +clean
 _ALL_ENGINES = (
@@ -102,6 +105,23 @@ def _load(engine: str) -> list[dict]:
     except (json.JSONDecodeError, OSError):
         return []
     return [r for r in data.get("items", []) if r.get("agree") is not None]
+
+
+def load_whole_page(engine: str) -> dict:
+    """ผลจาก measure_stability.py — อ่านทั้งหน้าซ้ำหลายรอบ ไม่พึ่ง engine อื่น
+
+    คนละไฟล์กับ rescue เพราะวัดคนละขอบเขต และวัดแล้ววิธีนี้ดีกว่าชัดเจน
+      พึ่ง engine อื่น  จับผิดได้ 2% ของบรรทัดที่ผิดจริง · เตือนเปล่า 43%
+      อ่านทั้งหน้าเอง   จับผิดได้ 88% · เตือนเปล่า 22% · ยิง API น้อยกว่า 9 เท่า
+    """
+    name = engine.replace("+", "_").replace("/", "_")
+    path = RESULTS_DIR / f"stability_{name}.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def _diff_summary(variants: list[str]) -> str:
@@ -253,6 +273,151 @@ def _run_panel(pages: list[PageInfo], results: dict) -> None:
             st.success("สั่งรันแล้ว — กดปุ่มโหลดผลใหม่ด้านล่างเป็นระยะ")
 
 
+def _spans(line: str, others: list[str]) -> str:
+    """ไฮไลต์เฉพาะช่วงที่รอบอื่นอ่านต่าง ไม่ใช่ทั้งบรรทัด
+
+    ทั้งบรรทัดแดงหมดอ่านยากและไม่บอกอะไร — ต่างกันตัวเดียวกับต่างทั้งประโยค
+    ดูเหมือนกันหมด เทียบทีละตัวอักษรแล้วระบายเฉพาะช่วงที่ไม่ตรง
+    """
+    marks = [False] * len(line)
+    tip = {}
+    for other in others:
+        for op in Levenshtein.opcodes(line, other):
+            if op.tag == "equal":
+                continue
+            a, b = op.src_start, max(op.src_end, op.src_start + 1)
+            for i in range(a, min(b, len(line))):
+                marks[i] = True
+                tip.setdefault(i, other[op.dest_start : op.dest_end] or "(ตัดทิ้ง)")
+
+    out, i = [], 0
+    while i < len(line):
+        if not marks[i]:
+            j = i
+            while j < len(line) and not marks[j]:
+                j += 1
+            out.append(html.escape(line[i:j]))
+            i = j
+            continue
+        j = i
+        while j < len(line) and marks[j]:
+            j += 1
+        alt = html.escape(str(tip.get(i, ""))[:24])
+        out.append(
+            f'<span class="wrong" data-tip="รอบอื่นอ่านเป็น: {alt}">'
+            f"{html.escape(line[i:j])}</span>"
+        )
+        i = j
+    return "".join(out)
+
+
+def _whole_page_view(pages: list[PageInfo], engine: str) -> bool:
+    """แสดงผลแบบอ่านทั้งหน้า — ภาพซ้าย ข้อความขวา ไฮไลต์ในบรรทัด
+
+    วางเลย์เอาต์เดียวกับแท็บเปรียบเทียบ เพราะเป็นงานเดียวกันคือ
+    กวาดตาดูข้อความแล้วเทียบกับภาพ รายการแบบกางทีละกล่องอ่านยากกว่ามาก
+    """
+    data = load_whole_page(engine)
+    if not data or not data.get("pages"):
+        return False
+
+    doc_of = {p.page_id: p.doc_name for p in pages}
+    by_id = {p.page_id: p for p in pages}
+    per_page = data["pages"]
+    docs = sorted({v.get("doc_name") or doc_of.get(k, "?") for k, v in per_page.items()})
+
+    top = st.columns([2.2, 1.8, 1.2])
+    pick = top[0].selectbox(
+        "เอกสาร", [ALL_DOCS] + docs, key="wp_doc",
+        format_func=lambda d: d if d == ALL_DOCS else short_doc(d, 34),
+    )
+    scope = {
+        k: v for k, v in sorted(per_page.items())
+        if pick == ALL_DOCS or (v.get("doc_name") or doc_of.get(k)) == pick
+    }
+    if not scope:
+        st.info("เอกสารนี้ยังไม่ได้วัด")
+        return True
+
+    shaky_of = {k: sum(1 for m in v["lines"] if not m["stable"]) for k, v in scope.items()}
+    pid = top[1].selectbox(
+        "หน้า", list(scope), key="wp_page",
+        format_func=lambda k: (
+            f"{by_id[k].page_no if k in by_id else k} · "
+            f"{'ไม่มั่นใจ ' + str(shaky_of[k]) + ' บรรทัด' if shaky_of[k] else 'นิ่งทุกบรรทัด'}"
+        ),
+    )
+    only = top[2].toggle("เฉพาะที่ไม่มั่นใจ", value=False, key="wp_only")
+
+    total = sum(len(v["lines"]) for v in scope.values())
+    shaky = sum(shaky_of.values())
+    st.caption(
+        f"ทั้งเอกสาร {total} บรรทัด · ต้องตรวจ {shaky} · ข้ามได้ {total - shaky} — "
+        f"อ่านทั้งหน้า {data.get('samples','?')} รอบ · temperature "
+        f"{data.get('temperature','?')} · ไม่พึ่ง engine อื่นเลย"
+    )
+
+    page = scope[pid]
+    rounds = [
+        [ln.strip() for ln in v.splitlines() if ln.strip()]
+        for v in page.get("variants", [])
+    ]
+
+    left, right = st.columns([1, 1.15])
+    img = IMAGE_DIR / f"{pid}.png"
+    with left:
+        if img.exists():
+            with st.container(border=True):
+                st.image(str(img), width="stretch")
+                st.caption("ภาพต้นฉบับ — เทียบกับข้อความด้านขวา")
+        else:
+            st.warning("ไม่พบภาพหน้านี้")
+
+    with right:
+        n = shaky_of[pid]
+        st.markdown(
+            f'<div class="lab">{len(page["lines"])} บรรทัด · '
+            f'ไม่มั่นใจ {n}</div>' + (pill("ต้องตรวจ " + str(n), "bad") if n
+            else pill("นิ่งทุกบรรทัด", "good")),
+            unsafe_allow_html=True,
+        )
+        st.caption("ชี้เมาส์ที่ช่วงสีแดงเพื่อดูว่ารอบอื่นอ่านเป็นอะไร")
+
+        body = []
+        for i, m in enumerate(page["lines"]):
+            if only and m["stable"]:
+                continue
+            if m["stable"]:
+                body.append(f'<div class="ln">{html.escape(m["text"])}</div>')
+            else:
+                near = [c for r in rounds[1:] if (c := _closest(m["text"], r))]
+                body.append(f'<div class="ln">{_spans(m["text"], near)}</div>')
+        st.markdown(
+            '<div style="border:1px solid var(--border);border-radius:.6rem;'
+            'padding:.7rem .9rem;background:var(--paper)">'
+            + ("".join(body) or '<div class="ln">— ไม่มีบรรทัดที่ไม่มั่นใจ —</div>')
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+        if n:
+            with st.expander(f"ดูข้อความดิบทั้ง {len(rounds)} รอบ"):
+                for j, r in enumerate(rounds, 1):
+                    st.markdown(f'<div class="lab">รอบ {j} · {len(r)} บรรทัด</div>',
+                                unsafe_allow_html=True)
+                    st.code("\n".join(r))
+    return True
+
+
+def _closest(line: str, pool: list[str]) -> str:
+    """บรรทัดในรอบนั้นที่ใกล้เคียงที่สุด — แต่ละรอบแบ่งบรรทัดไม่เท่ากัน
+    เทียบตามตำแหน่งตรง ๆ จะได้คนละเรื่อง"""
+    if not pool:
+        return ""
+    target = normalize(line)
+    return min(pool, key=lambda p: Levenshtein.distance(target, normalize(p)))
+
+
 def view_stability(pages: list[PageInfo], results: dict) -> None:
     st.subheader("วัดความนิ่ง")
     st.caption(
@@ -260,6 +425,40 @@ def view_stability(pages: list[PageInfo], results: dict) -> None:
         "รอบที่ตอบไม่ตรงกันคือจุดที่ engine เองก็ไม่มั่นใจ ควรให้คนดูภาพ"
     )
 
+    # ตั้งค่าเริ่มต้นเป็นตัวที่มีผลจริง ไม่ใช่ตัวแรกในรายการ — ไม่งั้นเปิดหน้ามา
+    # เจอ "ยังไม่มีผล" ทั้งที่มีข้อมูลอยู่ แค่คนละ engine
+    have = [e for e in API_ENGINES if load_whole_page(e).get("pages")]
+    engine_wp = st.selectbox(
+        "ดูผลของ",
+        API_ENGINES,
+        index=API_ENGINES.index(have[0]) if have else 0,
+        key="wp_engine",
+        format_func=lambda e: e + ("" if e in have else "  (ยังไม่มีผล)"),
+        help="ผลจาก measure_stability.py — อ่านทั้งหน้าซ้ำหลายรอบ",
+    )
+    if _whole_page_view(pages, engine_wp):
+        st.divider()
+        with st.expander("วิธีเก่า — ครอปเฉพาะจุดที่ engine อื่นชี้", expanded=False):
+            st.caption(
+                "เก็บไว้เทียบ วัดแล้วแย่กว่าชัดเจน — จับผิดได้ 2% ของบรรทัดที่ผิดจริง "
+                "และที่เตือนมา 43% เป็นการเตือนเปล่า เพราะเอา engine ที่แม่นน้อยกว่า "
+                "2-16 เท่ามาตัดสินตัวที่แม่นที่สุด"
+            )
+            _legacy_view(pages, results)
+        return
+
+    cmd = (
+        ".venv/Scripts/python.exe measure_stability.py "
+        f"--engine {engine_wp.split('+')[0]}"
+        + (" --clean" if "+clean" in engine_wp else "")
+    )
+    st.info(f"ยังไม่มีผลของ `{engine_wp}` — รันจากเทอร์มินัล\n\n`{cmd}`")
+    st.divider()
+    st.caption("ด้านล่างเป็นวิธีเก่าที่ครอปเฉพาะจุดที่ engine อื่นชี้")
+    _legacy_view(pages, results)
+
+
+def _legacy_view(pages: list[PageInfo], results: dict) -> None:
     _run_panel(pages, results)
 
     view = st.columns([2, 2])

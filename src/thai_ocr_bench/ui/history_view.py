@@ -56,18 +56,21 @@ def view_history() -> None:
             table = []
             for e in run.get("engines", []):
                 if e.get("skipped"):
+                    # ต้องเป็น None ไม่ใช่ "-" — คอลัมน์เดียวกันมีทั้ง int กับ str
+                    # ทำให้ pyarrow แปลงตารางไม่ผ่าน แล้วแท็บนี้พังทั้งแท็บ
+                    # (ArrowTypeError: Expected bytes, got a 'int' object)
                     table.append(
-                        {"engine": e["name"], "หน้า": "-", "บรรทัด": "-",
-                         "พัง": "-", "วินาที": "-", "สถานะ": "ข้าม (มีผลครบแล้ว)"}
+                        {"engine": e["name"], "หน้า": None, "บรรทัด": None,
+                         "พัง": None, "วินาที": None, "สถานะ": "ข้าม (มีผลครบแล้ว)"}
                     )
                 else:
                     table.append(
                         {
                             "engine": e["name"],
                             "หน้า": e.get("pages", 0),
-                            "บรรทัด": f"{e.get('lines', 0):,}",
+                            "บรรทัด": e.get("lines", 0),
                             "พัง": e.get("failures", 0),
-                            "วินาที": f"{e.get('seconds', 0):.1f}",
+                            "วินาที": round(float(e.get("seconds", 0)), 1),
                             "สถานะ": "เสร็จ",
                         }
                     )
