@@ -49,9 +49,17 @@ def test_ไม่มี_exception_ตอนเปิดหน้าเว็บ
 
 
 def test_แท็บครบทุกอัน(app: AppTest) -> None:
+    """เช็กว่าแท็บระดับบนครบตาม TABS
+
+    app.tabs นับแท็บทุกระดับรวมแท็บซ้อนในเนื้อหาด้วย (แท็บตรวจงานมี
+    "ตรวจทีละจุด/ดูทั้งหน้า" ซ้อนอยู่ข้างใน) เทียบจำนวนตรง ๆ จึงพังทุกครั้ง
+    ที่มีใครเพิ่มแท็บซ้อน ทั้งที่ไม่ใช่ความผิดพลาด — เช็กจากชื่อแทน
+    """
     from app import TABS
 
-    assert len(app.tabs) == len(TABS)
+    labels = {t.label for t in app.tabs}
+    missing = [name for name, _ in TABS if name not in labels]
+    assert not missing, f"แท็บระดับบนหายไป: {missing}"
 
 
 def test_แต่ละแท็บวาดอะไรออกมาจริง(app: AppTest) -> None:
