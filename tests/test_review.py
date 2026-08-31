@@ -161,3 +161,39 @@ class TestStaleSelection:
         ต้อง .get() แล้วเช็คก่อน ถึงจะบอกผู้ใช้ได้ว่าให้ไปสแกนก่อน"""
         results = {"e": {"docA_p001": object()}}
         assert results["e"].get("ไม่มีหน้านี้") is None
+
+
+class TestSuggest:
+    """เดาคำที่ถูกเฉพาะกรณีที่มีคำตอบเดียวจริง ๆ
+
+    เดาผิดแล้วคนกดรับไปเลยแย่กว่าไม่เดา — จึงเดาแค่เลขที่ผิดรูปแบบ
+    ซึ่งตัดสินได้โดยไม่ต้องดูภาพ
+    """
+
+    def test_เลขปนไทยอารบิกแปลงเป็นไทยทั้งก้อน(self):
+        from thai_ocr_bench.ui.review_view import suggest
+
+        line = "พุทธศักราช ๒24๗"
+        m = digit_marks(line)[0]
+        assert m.kind == "mixed"
+        assert suggest(m, line) == "๒๒๔๗"
+
+    def test_เลขอารบิกในเอกสารเลขไทยแปลงเป็นไทย(self):
+        from thai_ocr_bench.ui.review_view import suggest
+
+        line = "มาตรา 14"
+        assert suggest(digit_marks(line, thai_doc=True)[0], line) == "๑๔"
+
+    def test_ตัวเลขปกติไม่เดา(self):
+        """เลขอารบิกในเอกสารเลขอารบิกถูกอยู่แล้ว ไม่มีอะไรให้แนะนำ"""
+        from thai_ocr_bench.ui.review_view import suggest
+
+        line = "วันที่ 20"
+        assert suggest(digit_marks(line, thai_doc=False)[0], line) is None
+
+    def test_ไม่เดาความไม่นิ่ง(self):
+        """อ่านซ้ำแล้วตอบไม่ตรงกันไม่ได้บอกว่าอันไหนถูก ต้องให้คนดูภาพเอง"""
+        from thai_ocr_bench.review import Mark
+        from thai_ocr_bench.ui.review_view import suggest
+
+        assert suggest(Mark(0, 5, "shaky", "ไม่นิ่ง"), "อำเภอถลาง") is None

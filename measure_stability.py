@@ -105,9 +105,46 @@ def main() -> None:
         f"  (ภาพจาก {img_dir.name}/)\n"
     )
 
+    # โหลดของเดิมมาต่อ ไม่เริ่มใหม่ — รันครั้งก่อนอาจถูกตัดกลางคัน
+    # และการยิง API ที่จ่ายไปแล้วไม่ควรเสียเปล่า
+    path = report_path(args.engine, args.clean)
     out: dict[str, dict] = {}
+    if path.exists():
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+            if old.get("samples") == args.samples:
+                out = old.get("pages", {})
+                if out:
+                    print(f"ต่อจากของเดิม {len(out)} หน้า")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    def flush() -> None:
+        """เขียนลงดิสก์ทุกหน้า ไม่รอจบ
+
+        เดิมเขียนตอนจบอย่างเดียว รอบที่ถูกตัดกลางคันจึงเสียทั้งหมด
+        เจอจริงตอนรัน 30 หน้าแล้วโดน timeout ที่หน้า 11 — ยิง API ไป 33 ครั้ง
+        แล้วไม่ได้อะไรกลับมาเลย
+        """
+        path.write_text(
+            json.dumps(
+                {
+                    "engine": args.engine + ("+clean" if args.clean else ""),
+                    "samples": args.samples,
+                    "temperature": args.temperature,
+                    "pages": out,
+                },
+                ensure_ascii=False,
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
+
     t0 = time.time()
-    for i, page in enumerate(pages, 1):
+    todo = [p for p in pages if p.page_id not in out]
+    if len(todo) < len(pages):
+        print(f"ข้าม {len(pages) - len(todo)} หน้าที่วัดไว้แล้ว")
+    for i, page in enumerate(todo, 1):
         try:
             variants = engine.read_variants(
                 img_dir / f"{page.page_id}.png",
@@ -115,7 +152,7 @@ def main() -> None:
                 temperature=args.temperature,
             )
         except Exception as exc:  # noqa: BLE001 — หน้าเดียวพังต้องไม่ทำให้รอบอื่นหยุด
-            print(f"  {i}/{len(pages)} {page.page_id} — พัง: {type(exc).__name__}: {exc}")
+            print(f"  {i}/{len(todo)} {page.page_id} — พัง: {type(exc).__name__}: {exc}")
             continue
 
         per_round = [split_lines(v) for v in variants]
@@ -131,27 +168,15 @@ def main() -> None:
             "variants": variants,
             "lines": marked,
         }
+        flush()
         print(
-            f"  {i}/{len(pages)} {page.page_id} — {len(main_lines)} บรรทัด · "
+            f"  {i}/{len(todo)} {page.page_id} — {len(main_lines)} บรรทัด · "
             f"ไม่นิ่ง {unstable}"
             + (f"  (แต่ละรอบได้ {', '.join(str(len(r)) for r in per_round)} บรรทัด)"
                if len({len(r) for r in per_round}) > 1 else "")
         )
 
-    path = report_path(args.engine, args.clean)
-    path.write_text(
-        json.dumps(
-            {
-                "engine": args.engine + ("+clean" if args.clean else ""),
-                "samples": args.samples,
-                "temperature": args.temperature,
-                "pages": out,
-            },
-            ensure_ascii=False,
-            indent=1,
-        ),
-        encoding="utf-8",
-    )
+    flush()
     total = sum(len(p["lines"]) for p in out.values())
     unstable = sum(1 for p in out.values() for m in p["lines"] if not m["stable"])
     print(f"\nรวม {total} บรรทัด · ไม่นิ่ง {unstable}"
