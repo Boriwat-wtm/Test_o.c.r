@@ -19,6 +19,7 @@ from thai_ocr_bench.ui.history_view import view_history
 from thai_ocr_bench.ui.images import view_images
 from thai_ocr_bench.ui.markdown_view import view_markdown
 from thai_ocr_bench.ui.rescue_view import view_rescue
+from thai_ocr_bench.ui.review_view import view_review
 from thai_ocr_bench.ui.scan import progress_banner, scan_panel
 from thai_ocr_bench.ui.stability import view_stability
 from thai_ocr_bench.ui.summary import view_summary
@@ -33,6 +34,7 @@ st.set_page_config(page_title="ตรวจผล OCR ภาษาไทย", la
 # ของแท็บที่อยู่หลังมัน ทำให้ทุกแท็บถัดไปวาดผิดอัน
 TABS: list[tuple[str, str]] = [
     ("🔍 เปรียบเทียบ", "compare"),
+    ("✅ ตรวจงาน", "review"),
     ("⚠️ จุดน่าสงสัย", "suspects"),
     ("📊 สรุปผล", "summary"),
     ("✏️ ทำเฉลย", "truth"),
@@ -91,6 +93,7 @@ def main() -> None:
     tabs = st.tabs([label for label, _ in TABS])
     draw = {
         "compare": lambda: view_compare(pages, results),
+        "review": lambda: view_review(pages, results),
         "suspects": lambda: view_suspects(pages, results),
         "summary": lambda: view_summary(pages, results),
         "truth": lambda: view_truth(pages, results),
