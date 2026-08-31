@@ -51,7 +51,7 @@ CSS = """
 .stu-tag{display:inline-block;font-family:ui-monospace,monospace;font-size:10.5px;
   font-weight:700;padding:.1rem .45rem;border-radius:999px;margin-right:.35rem}
 .stu-doc{border:1px solid var(--border,#E4E6EC);border-radius:.6rem;
-  padding:1rem 1.15rem;background:var(--paper,#fff);max-height:62vh;overflow-y:auto}
+  padding:1rem 1.15rem;background:var(--paper,#fff)}
 .stu-row{display:flex;gap:.7rem;align-items:baseline;padding:.12rem 0}
 .stu-row.hit{background:rgba(79,70,229,.045);border-radius:.3rem;
   margin:0 -.35rem;padding:.12rem .35rem}
@@ -59,14 +59,20 @@ CSS = """
   min-width:2.2em;text-align:right;flex:none;user-select:none}
 .stu-txt{font-size:15.5px;line-height:1.95;word-break:break-word;flex:1}
 
-/* ภาพครอปเด้งตอนชี้เมาส์ที่บรรทัดไหนก็ได้ ไม่ต้องเล็งตัวเลข
-   วางไว้ติดขอบบนของกล่อง ไม่ใช่ลอยเหนือบรรทัดที่ชี้ — ถ้าลอยตามบรรทัด
-   มันจะบังข้อความรอบ ๆ ตลอดเวลาที่เลื่อนเมาส์ผ่าน ซึ่งขัดการกวาดตาอ่าน
+/* ภาพครอปเด้งเหนือบรรทัดที่ชี้ ไม่ใช่ตำแหน่งคงที่บนกล่อง
+   เคยลองวางไว้บนสุดของกล่องแล้ว แต่กล่องเลื่อนได้ พอชี้บรรทัดล่าง ๆ
+   ภาพจะอยู่นอกจอที่มองเห็น ต้องเลื่อนกลับขึ้นไปดูซึ่งไม่มีประโยชน์
+
+   กล่องจึงต้องไม่มี overflow ของตัวเอง (ให้หน้าเว็บเลื่อนแทน) ไม่งั้น
+   ภาพที่ลอยเหนือบรรทัดแรก ๆ จะถูก overflow ตัดหัวทิ้ง
    ใช้ CSS ล้วน ไม่ง้อ JS เพราะ Streamlit ตัด script ที่ฝังมากับ markdown ทิ้ง */
-.stu-doc{position:relative}
-.stu-peek{position:absolute;left:.6rem;right:.6rem;top:.5rem;z-index:60;
-  display:none;padding:.4rem;background:#fff;border:1px solid #CFD3DD;
-  border-radius:.5rem;box-shadow:0 10px 30px rgba(20,22,27,.18)}
+.stu-row{position:relative}
+.stu-peek{display:none;position:absolute;left:2.2rem;right:.2rem;
+  bottom:calc(100% + 6px);z-index:60;padding:.4rem;background:#fff;
+  border:1px solid #CFD3DD;border-radius:.5rem;
+  box-shadow:0 10px 30px rgba(20,22,27,.18)}
+/* สองบรรทัดแรกไม่มีที่ว่างข้างบน พลิกลงล่างแทน ไม่งั้นโผล่นอกกล่อง */
+.stu-row:nth-child(-n+2)>.stu-peek{bottom:auto;top:calc(100% + 6px)}
 .stu-peek img{display:block;width:100%;border-radius:.3rem}
 .stu-peek .cap{font-family:ui-monospace,monospace;font-size:11px;
   color:#5B5F6B;padding:.3rem .1rem 0}
