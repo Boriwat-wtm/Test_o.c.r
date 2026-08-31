@@ -14,15 +14,19 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 import streamlit as st
 
-from ..config import IMAGE_DIR, RESULTS_DIR
+from .. import history, progress
+from ..config import IMAGE_DIR, RESULTS_DIR, ROOT
 from ..render import PageInfo
 from ..rescue_crop import ZOOM
 from ..thai_text import normalize
 from .common import page_label, rescue_crop_uri, short_doc
 from .rescue_view import start_rescue
+from .scan import run_is_active
 
 # ตัวที่หน้านี้รองรับ — ต้องมี read_variants() และไม่กินการ์ดจอ
 API_ENGINES = ("typhoon-api", "typhoon-api-num", "typhoon-api+clean", "typhoon-api-num+clean")
@@ -93,6 +97,54 @@ def _diff_summary(variants: list[str]) -> str:
 ALL_DOCS = "ทุกเอกสาร"
 
 
+def start_scan_then_measure(engine: str, doc: str, samples: int) -> bool:
+    """สแกนเอกสารนี้ก่อน แล้ววัดความนิ่งต่อทันที ในโปรเซสเดียว
+
+    ทำไมต้องต่อกันเอง — วัดความนิ่งต้องมีผลอ่านเดิมก่อนถึงจะรู้ว่าจุดไหน
+    น่าสงสัย ถ้าให้ผู้ใช้ไปกดสแกนที่แถบซ้ายแล้วกลับมากดวัดเอง ต้องเฝ้ารอ
+    ว่าสแกนจบหรือยัง ซึ่งไม่มีอะไรบอกให้ในหน้านี้
+
+    ใช้ python -c เรียกสองคำสั่งเรียงกัน เพราะ Popen หนึ่งครั้งรันได้คำสั่งเดียว
+    และถ้าแยกเป็นสอง Popen ตัวที่สองจะเริ่มทันทีโดยยังไม่มีผลอ่านให้ใช้
+    """
+    if run_is_active(progress.load()):
+        st.warning("มีตัวรันทำงานอยู่แล้ว ไม่สั่งซ้ำ")
+        return False
+
+    base = engine.split("+")[0]
+    scan = [sys.executable, str(ROOT / "run_bench.py"), "-e", base, "--doc", doc]
+    if "+clean" in engine:
+        scan.append("--clean")
+    measure = [
+        sys.executable, str(ROOT / "rescue.py"),
+        "--engine", engine, "--doc", doc, "--samples", str(samples),
+    ]
+
+    log = RESULTS_DIR / "rescue.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    handle = log.open("a", encoding="utf-8")
+    bar = "=" * 70
+    handle.write(
+        f"\n{bar}\nสแกนแล้ววัดความนิ่ง {history.now_iso()}\n"
+        f"  engine {engine} · เอกสาร {doc} · {samples} รอบ\n{bar}\n"
+    )
+    handle.flush()
+
+    # รันตัวที่สองเฉพาะเมื่อตัวแรกสำเร็จ ไม่งั้นจะวัดกับผลที่ยังไม่มี
+    runner = (
+        "import subprocess,sys;"
+        "r=subprocess.run(sys.argv[1:sys.argv.index('--then')]);"
+        "sys.exit(r.returncode) if r.returncode else None;"
+        "sys.exit(subprocess.run(sys.argv[sys.argv.index('--then')+1:]).returncode)"
+    )
+    subprocess.Popen(
+        [sys.executable, "-c", runner, *scan, "--then", *measure],
+        stdout=handle, stderr=subprocess.STDOUT, cwd=ROOT,
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    )
+    return True
+
+
 def _run_panel(pages: list[PageInfo], results: dict) -> None:
     """ปุ่มสั่งรัน — วางไว้บนสุดเพราะหน้านี้ว่างเปล่าจนกว่าจะรัน"""
     with st.expander("สั่งวัดความนิ่ง", expanded=False):
@@ -126,12 +178,28 @@ def _run_panel(pages: list[PageInfo], results: dict) -> None:
             help="0 = ทุกจุดของเอกสารที่เลือก · ใส่เลขไว้ตอนอยากลองก่อน",
         )
 
+        # เอกสารที่ยังไม่ได้สแกนไม่ใช่ทางตัน — สั่งสแกนแล้ววัดต่อได้จากตรงนี้เลย
+        # ไม่ต้องไปกดที่แถบซ้ายแล้วเฝ้ารอเองว่าสแกนจบหรือยัง
         if doc != ALL_DOCS and not counts.get(doc):
             if reasons.get(doc) == "ยังไม่ได้สแกน":
                 st.warning(
                     f"`{engine}` ยังไม่เคยอ่าน **{short_doc(doc, 40)}** — "
-                    "วัดความนิ่งต้องอาศัยผลอ่านเดิมเพื่อหาว่าจุดไหนน่าสงสัย "
-                    "ไปสั่งสแกนเอกสารนี้จากแถบซ้ายก่อน"
+                    "วัดความนิ่งต้องมีผลอ่านเดิมก่อนถึงจะรู้ว่าจุดไหนน่าสงสัย"
+                )
+                n_pages = sum(1 for p in pages if p.doc_name == doc)
+                if st.button(
+                    f"สแกน {n_pages} หน้าแล้ววัดต่อให้เลย",
+                    type="primary",
+                    key="stab_chain",
+                ):
+                    if start_scan_then_measure(engine, doc, int(samples)):
+                        st.success(
+                            "สั่งแล้ว — สแกนก่อน แล้ววัดความนิ่งต่ออัตโนมัติ "
+                            "ดูความคืบหน้าได้ที่แถบซ้าย"
+                        )
+                st.caption(
+                    "สแกนเสร็จแล้วจะวัดต่อทันทีในโปรเซสเดียว "
+                    "ถ้าสแกนพังจะไม่วัดต่อ เพราะไม่มีผลอ่านให้ใช้"
                 )
             else:
                 st.info(
