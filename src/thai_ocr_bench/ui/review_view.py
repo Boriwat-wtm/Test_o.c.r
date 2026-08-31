@@ -50,6 +50,14 @@ CSS = """
 .shaky-line{background:#FDF1DF;border-radius:4px;padding:.05em .15em}
 .stu-tag{display:inline-block;font-family:ui-monospace,monospace;font-size:10.5px;
   font-weight:700;padding:.1rem .45rem;border-radius:999px;margin-right:.35rem}
+.stu-doc{border:1px solid var(--border,#E4E6EC);border-radius:.6rem;
+  padding:1rem 1.15rem;background:var(--paper,#fff);max-height:62vh;overflow-y:auto}
+.stu-row{display:flex;gap:.7rem;align-items:baseline;padding:.12rem 0}
+.stu-row.hit{background:rgba(79,70,229,.045);border-radius:.3rem;
+  margin:0 -.35rem;padding:.12rem .35rem}
+.stu-gut{font-family:ui-monospace,monospace;font-size:11px;color:#8C919E;
+  min-width:2.2em;text-align:right;flex:none;user-select:none}
+.stu-txt{font-size:15.5px;line-height:1.95;word-break:break-word;flex:1}
 </style>
 """
 
@@ -128,7 +136,7 @@ def _overlay(uri: str, w: int, h: int, rows: list) -> str:
     )
 
 
-def _line_html(row: review.ReviewLine) -> str:
+def _inline(row: review.ReviewLine) -> str:
     """ระบายสีเฉพาะช่วงที่ต้องดู ส่วนที่เหลือปล่อยไว้
 
     ความไม่นิ่งครอบทั้งบรรทัด จึงวาดเป็นพื้นหลังจาง แล้ววาดตัวเลขทับ
@@ -154,7 +162,7 @@ def _line_html(row: review.ReviewLine) -> str:
     inner = "".join(body)
     if any(m.kind == "shaky" for m in row.marks):
         inner = f'<span class="shaky-line">{inner}</span>'
-    return f'<div class="ln">{inner}</div>'
+    return inner
 
 
 def _picker(pages: list[PageInfo], results: dict):
@@ -275,78 +283,108 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
             st.warning(f"ไม่พบภาพใน {img_dir.name}/")
 
     with right:
-        editing = st.toggle("โหมดแก้ข้อความ", value=False, key="rv_edit")
-        only = st.toggle("เฉพาะบรรทัดที่ต้องตรวจ", value=True, key="rv_only")
-        if saved is not None:
-            st.caption(f"หน้านี้มีฉบับที่แก้ไว้แล้ว {len(lines)} บรรทัด")
-
-        edits: dict[int, str] = {}
-        for row in rows:
-            if only and not row.needs_check:
-                continue
-            if row.needs_check:
-                kinds = dict.fromkeys(_KIND[m.kind][1] for m in row.marks)
-                st.markdown(
-                    f'<div class="lab">บรรทัด {row.index + 1} · {" · ".join(kinds)}</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown(_line_html(row), unsafe_allow_html=True)
-
-            if not row.needs_check:
-                continue
-            hints = [f for m in row.marks if (f := suggest(m, row.text))]
-            if hints:
-                st.caption("น่าจะเป็น: " + " · ".join(hints))
-            if editing:
-                edits[row.index] = st.text_input(
-                    f"บรรทัด {row.index + 1}",
-                    value=row.text,
-                    key=f"rv_line|{picked.page_id}|{engine}|{row.index}",
-                    label_visibility="collapsed",
-                )
-            elif row.box:
-                with st.popover("ดูภาพตรงจุดนี้", width="content"):
-                    crop = rescue_crop_uri(str(img), tuple(row.box))
-                    if crop:
-                        st.markdown(
-                            f'<img src="{crop}" style="width:100%;border-radius:.4rem;'
-                            f'border:1px solid var(--border)">',
-                            unsafe_allow_html=True,
-                        )
-            else:
-                st.caption("ยืมพิกัดบรรทัดนี้ไม่ได้ — ไม่มีภาพครอปให้ดู")
-
-        if editing:
-            _save_bar(picked.page_id, engine, lines, edits, saved is not None)
+        _text_panel(picked, engine, rows, lines, saved, img, s)
 
 
-def _save_bar(
-    page_id: str, engine: str, lines: list[str], edits: dict[int, str], has_saved: bool
-) -> None:
-    """ปุ่มบันทึก — เขียนทั้งหน้า ไม่ใช่เฉพาะบรรทัดที่แก้
+def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
+    """ฝั่งข้อความ — แสดงเป็นเอกสารต่อเนื่อง ไม่ใช่บรรทัดละก้อน
 
-    ต้องเก็บทั้งหน้าเพราะไฟล์นี้เป็นฉบับที่คนแก้แล้วของหน้านั้น แท็บ markdown
-    หยิบไปใช้แทนผลดิบตอนส่งออก ถ้าเก็บแต่บรรทัดที่แก้ ที่เหลือจะหายไป
+    ของเดิมวาดป้าย "บรรทัด N · ตัวเลข" กับคำอธิบายคั่นทุกบรรทัดที่ mark
+    ผลคือข้อความถูกหั่นเป็นชิ้น อ่านเป็นเอกสารไม่ได้ ทั้งที่คนตรวจต้อง
+    อ่านความต่อเนื่องเพื่อรู้ว่าคำไหนควรเป็นอะไร
+
+    ตอนนี้เลขบรรทัดอยู่ริมซ้ายเป็นแถบ gutter บรรทัดที่ต้อง mark มีพื้นหลังจาง
+    ข้อมูลว่าทำไมถึง mark ย้ายไปอยู่ใน tooltip ของช่วงที่ระบายสี
     """
-    changed = {i: v for i, v in edits.items() if i < len(lines) and v != lines[i]}
-    st.divider()
-    cols = st.columns([1.6, 1.3, 2])
-    if cols[0].button(
-        f"ยืนยันการแก้ไข ({len(changed)})" if changed else "ยืนยันการแก้ไข",
-        type="primary",
-        disabled=not changed,
-        key=f"rv_save|{page_id}",
+    bar = st.columns([1.3, 1.4, 1.6])
+    editing = bar[0].toggle("แก้ข้อความ", value=False, key="rv_edit")
+    only = bar[1].toggle("เฉพาะที่ต้องตรวจ", value=True, key="rv_only")
+    if saved is not None:
+        bar[2].caption(f"มีฉบับที่แก้ไว้ {len(lines)} บรรทัด")
+
+    if editing:
+        _edit_panel(picked, engine, lines, saved)
+        return
+
+    shown = [r for r in rows if r.needs_check or not only]
+    if not shown:
+        st.success("ไม่มีบรรทัดไหนต้องตรวจ — ไม่ได้แปลว่าอ่านถูกหมด")
+        return
+
+    body = []
+    for r in shown:
+        cls = "stu-row hit" if r.needs_check else "stu-row"
+        body.append(
+            f'<div class="{cls}"><span class="stu-gut">{r.index + 1}</span>'
+            f'<span class="stu-txt">{_inline(r)}</span></div>'
+        )
+    st.markdown(f'<div class="stu-doc">{"".join(body)}</div>', unsafe_allow_html=True)
+
+    # คำแนะนำรวมไว้ที่เดียวใต้กล่อง ไม่แทรกคั่นกลางข้อความ
+    hints = [
+        f"บรรทัด {r.index + 1}: {f}"
+        for r in shown
+        for m in r.marks
+        if (f := suggest(m, r.text))
+    ]
+    if hints:
+        st.caption("แก้ได้เลยโดยไม่ต้องดูภาพ — " + " · ".join(hints[:6]))
+
+    pick = [r for r in shown if r.needs_check and r.box]
+    if pick:
+        c = st.columns([1.6, 2.4])
+        at = c[0].selectbox(
+            "ดูภาพบรรทัด",
+            [r.index for r in pick],
+            format_func=lambda i: f"บรรทัด {i + 1}",
+            key=f"rv_crop|{picked.page_id}",
+            label_visibility="collapsed",
+        )
+        row = next(r for r in pick if r.index == at)
+        crop = rescue_crop_uri(str(img), tuple(row.box))
+        if crop:
+            st.markdown(
+                f'<img src="{crop}" style="width:100%;border-radius:.4rem;'
+                f'border:1px solid var(--border)">',
+                unsafe_allow_html=True,
+            )
+    if s["with_box"] < s["lines"]:
+        st.caption(
+            f"ยืมพิกัดได้ {s['with_box']}/{s['lines']} บรรทัด — "
+            "ที่เหลือกดดูภาพตรงจุดไม่ได้ ต้องสแกน tesseract หน้านี้เพิ่ม"
+        )
+
+
+def _edit_panel(picked, engine, lines: list[str], saved: str | None) -> None:
+    """แก้ทั้งหน้าในช่องเดียว ไม่ใช่ช่องละบรรทัด
+
+    ช่องละบรรทัดทำให้ย้ายข้อความข้ามบรรทัดไม่ได้ ซึ่งจำเป็นเวลา OCR
+    หั่นบรรทัดผิดที่ — เคสที่เจอบ่อยกับ engine ที่ตีกรอบพลาด
+    """
+    text = st.text_area(
+        "ข้อความทั้งหน้า",
+        value="\n".join(lines),
+        height=460,
+        key=f"rv_area|{picked.page_id}|{engine}",
+        label_visibility="collapsed",
+    )
+    new = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    changed = new != lines
+
+    b = st.columns([1.5, 1.3, 2])
+    if b[0].button(
+        "บันทึกการแก้ไข", type="primary", disabled=not changed,
+        key=f"rv_save|{picked.page_id}",
     ):
-        merged = [edits.get(i, ln) for i, ln in enumerate(lines)]
-        markdown_out.save_page(page_id, engine, "\n".join(merged))
-        st.success(f"บันทึกแล้ว {len(changed)} บรรทัด")
+        markdown_out.save_page(picked.page_id, engine, "\n".join(new))
+        st.success(f"บันทึกแล้ว {len(new)} บรรทัด")
         st.rerun()
 
-    if has_saved and cols[1].button("ล้างที่แก้ไว้", key=f"rv_reset|{page_id}"):
-        markdown_out.clear_page(page_id, engine)
+    if saved is not None and b[1].button("ล้างที่แก้ไว้", key=f"rv_reset|{picked.page_id}"):
+        markdown_out.clear_page(picked.page_id, engine)
         st.rerun()
 
-    cols[2].caption(
-        "บันทึกแล้วแท็บ markdown จะใช้ฉบับนี้แทนผลดิบตอนส่งออก "
-        "· ผลดิบเดิมไม่ถูกแก้ ย้อนกลับได้เสมอ"
+    b[2].caption(
+        f"{len(new)} บรรทัด · "
+        + ("มีการแก้ ยังไม่บันทึก" if changed else "ยังไม่ได้แก้อะไร")
     )
