@@ -170,7 +170,14 @@ def _picker(pages: list[PageInfo], results: dict):
     doc = top[1].selectbox(
         "เอกสาร", docs, key="rv_doc", format_func=lambda d: short_doc(d, 34)
     )
+    # ช่องนี้ก็จำค่าเก่าเหมือนช่องหน้า สลับ engine แล้วเอกสารที่เลือกไว้อาจไม่มี
+    # ใน engine ใหม่ ทำให้ subset ว่าง แล้ว next(iter(by_id)) โยน StopIteration
+    if doc not in docs:
+        doc = docs[0]
     subset = [p for p in ok_pages if p.doc_name == doc]
+    if not subset:
+        st.info(f"`{engine}` ยังไม่ได้อ่านเอกสารนี้ — เลือกเอกสารอื่นหรือสั่งสแกนก่อน")
+        return None
 
     # ใช้ page_id เป็นค่า ไม่ใช่ PageInfo — Streamlit จำค่าที่เลือกตามคีย์
     # พอสลับ engine แล้วชุดหน้าเปลี่ยน ค่าเก่าค้างแล้วหาไม่เจอ พังทั้งแท็บ

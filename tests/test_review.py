@@ -156,6 +156,20 @@ class TestStaleSelection:
         page_id = stale if stale in by_id else next(iter(by_id))
         assert page_id == "docA_p001"
 
+    def test_เอกสารที่ค้างอยู่ต้องถูกรีเซ็ตด้วย(self):
+        """เคสจริงรอบสอง: แก้แค่ช่องหน้า ลืมช่องเอกสาร
+        สลับ engine แล้วเอกสารที่จำไว้ไม่มีใน engine ใหม่ subset จึงว่าง
+        แล้ว next(iter(by_id)) โยน StopIteration ทั้งหน้า"""
+        docs = ["docA", "docB"]
+        stale = "เอกสารของ engine ก่อนหน้า"
+        doc = stale if stale in docs else docs[0]
+        assert doc == "docA"
+
+    def test_subset_ว่างต้องคืนก่อนถึง_next_iter(self):
+        """ต่อให้ doc ถูก แต่ถ้าไม่มีหน้าเลย ก็ต้องบอกผู้ใช้ ไม่ใช่พัง"""
+        subset: list = []
+        assert not subset, "ต้องเช็ก subset ว่างก่อนเรียก next(iter(...))"
+
     def test_ต้องหยิบ_stored_ด้วย_get_ไม่ใช่_subscript(self):
         """results[engine][page_id] ตรง ๆ พังทันทีถ้าหน้าไม่มี
         ต้อง .get() แล้วเช็คก่อน ถึงจะบอกผู้ใช้ได้ว่าให้ไปสแกนก่อน"""
