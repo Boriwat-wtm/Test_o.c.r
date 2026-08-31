@@ -86,178 +86,93 @@ def _render(row: review.ReviewLine) -> str:
     return f'<div class="ln">{inner}</div>'
 
 
-def _focus_mode(
-    picked, engine: str, rows: list, img: Path, saved: str | None, lines: list[str]
+def _save_bar(
+    page_id: str, engine: str, lines: list[str], edits: dict[int, str], has_saved: bool
 ) -> None:
-    """ตรวจทีละจุด — ภาพใหญ่ ข้อความเดียว ปุ่มไม่กี่ปุ่ม
+    """ปุ่มบันทึก — เขียนทั้งหน้า ไม่ใช่เฉพาะบรรทัดที่แก้
 
-    ทำไมไม่แสดงเป็นรายการยาวให้เลื่อนดู — งานนี้คือ "ดูจุดนี้ เทียบภาพ
-    แก้ถ้าผิด ไปจุดถัดไป" ซ้ำไปเรื่อย ๆ การเห็นทุกจุดพร้อมกันไม่ได้ช่วย
-    แต่ทำให้ต้องเลื่อนหาเองว่าดูถึงไหนแล้ว และภาพครอปที่ซ่อนใต้ปุ่ม
-    ต้องกดเปิดทุกบรรทัด ทั้งที่มันคือสิ่งเดียวที่ต้องดูจริง
-
-    จำตำแหน่งที่ดูถึงไว้แยกตามหน้า สลับหน้าไปมาแล้วกลับมายังอยู่ที่เดิม
-    (ไม่รอดข้ามการรีสตาร์ทเซิร์ฟเวอร์ ซึ่งยอมรับได้สำหรับงานตรวจทีละรอบ)
+    ต้องเก็บทั้งหน้าเพราะไฟล์นี้เป็นฉบับที่คนแก้แล้วของหน้านั้น แท็บ markdown
+    จะหยิบไปใช้แทนผลดิบตอนส่งออก ถ้าเก็บแต่บรรทัดที่แก้ ที่เหลือจะหายไป
     """
-    todo = [r for r in rows if r.needs_check]
-    if not todo:
-        st.success("หน้านี้ไม่มีจุดที่ต้องตรวจ — ไม่ได้แปลว่าอ่านถูกหมด")
-        return
-
-    key = f"rv_at|{picked.page_id}|{engine}"
-    at = min(st.session_state.get(key, 0), len(todo) - 1)
-    row = todo[at]
-
-    st.progress((at + 1) / len(todo), text=f"จุดที่ {at + 1} จาก {len(todo)} ในหน้านี้")
-
-    # ภาพครอปกางเต็มความกว้าง เป็นสิ่งที่คนต้องดูจริง ไม่ควรต้องกดเปิด
-    if row.box:
-        uri = rescue_crop_uri(str(img), tuple(row.box))
-        if uri:
-            st.markdown(
-                f'<img src="{uri}" style="width:100%;border-radius:.5rem;'
-                f'border:1px solid var(--border)">',
-                unsafe_allow_html=True,
-            )
-    else:
-        st.warning(
-            "ยืมพิกัดบรรทัดนี้ไม่ได้ จึงไม่มีภาพครอป — "
-            "สั่งสแกน tesseract กับหน้านี้ก่อนถึงจะมีภาพให้เทียบ"
-        )
-
-    tags = " · ".join(dict.fromkeys(_TONE[m.kind][1] for m in row.marks))
-    st.markdown(
-        f'<div class="lab">บรรทัด {row.index + 1} · {tags}</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(_render(row), unsafe_allow_html=True)
-
-    fixed = st.text_input(
-        "แก้ตรงนี้ถ้าไม่ตรงกับภาพ",
-        value=row.text,
-        key=f"rv_fix|{picked.page_id}|{engine}|{row.index}",
-    )
-
-    changed = fixed.strip() != row.text.strip()
-    last = at >= len(todo) - 1
-    b = st.columns([1.0, 1.5, 1.1, 1.8])
-
-    if b[0].button("ย้อนกลับ", disabled=at == 0, key=f"rv_prev|{picked.page_id}"):
-        st.session_state[key] = at - 1
+    changed = {i: v for i, v in edits.items() if i < len(lines) and v != lines[i]}
+    st.divider()
+    cols = st.columns([1.4, 1.4, 2.2])
+    if cols[0].button(
+        f"บันทึก {len(changed)} บรรทัดที่แก้" if changed else "บันทึก",
+        type="primary",
+        disabled=not changed,
+        key=f"rv_save·{page_id}",
+    ):
+        merged = [edits.get(i, ln) for i, ln in enumerate(lines)]
+        markdown_out.save_page(page_id, engine, "\n".join(merged))
+        st.success(f"บันทึกแล้ว {len(changed)} บรรทัด")
         st.rerun()
 
-    if changed:
-        label = "บันทึกแล้วไปต่อ"
-    elif last:
-        label = "ถูกแล้ว จบหน้านี้"
-    else:
-        label = "ถูกแล้ว ไปต่อ"
-    if b[1].button(label, type="primary", key=f"rv_next|{picked.page_id}"):
-        if changed:
-            merged = list(lines)
-            merged[row.index] = fixed
-            markdown_out.save_page(picked.page_id, engine, "\n".join(merged))
-        st.session_state[key] = min(at + 1, len(todo) - 1)
+    if has_saved and cols[1].button("ล้างฉบับที่แก้", key=f"rv_reset·{page_id}"):
+        markdown_out.clear_page(page_id, engine)
         st.rerun()
 
-    if b[2].button("ข้ามไปก่อน", disabled=last, key=f"rv_skip|{picked.page_id}"):
-        st.session_state[key] = at + 1
-        st.rerun()
-
-    if saved is not None:
-        with b[3]:
-            if st.button("ล้างที่แก้ไว้", key=f"rv_reset|{picked.page_id}"):
-                markdown_out.clear_page(picked.page_id, engine)
-                st.rerun()
-
-
-def _page_mode(picked, engine: str, rows: list, img: Path, s: dict, donor) -> None:
-    """ดูทั้งหน้ารวดเดียว — ไว้กวาดตาดูภาพรวม ไม่ใช่ไว้แก้ทีละจุด"""
-    note = (
-        f"ยืมพิกัดจาก `{donor}` — ได้ {s['with_box']}/{s['lines']} บรรทัด"
-        if donor
-        else "ไม่มี engine ที่คืนพิกัดสำหรับหน้านี้ จึงไม่มีภาพครอปให้ดู"
+    cols[2].caption(
+        "บันทึกแล้วแท็บ markdown จะใช้ฉบับนี้แทนผลดิบตอนส่งออก "
+        "· ผลดิบเดิมไม่ถูกแก้ ย้อนกลับได้เสมอ"
     )
-    st.caption(f"{note} · engine ที่ยืมมาบอกตำแหน่งอย่างเดียว ไม่มีสิทธิ์แก้ข้อความ")
-
-    only = st.toggle("เฉพาะบรรทัดที่ต้องตรวจ", value=True, key="rv_only")
-    left, right = st.columns([1, 1.15])
-    with left:
-        with st.container(border=True):
-            if img.exists():
-                uri, _w, _h = cached_image(img)
-                st.markdown(
-                    f'<img src="{uri}" style="width:100%;border-radius:.4rem">',
-                    unsafe_allow_html=True,
-                )
-                st.caption(f"ภาพที่ engine อ่านจริง ({img.parent.name}/)")
-            else:
-                st.warning(f"ไม่พบภาพใน {img.parent.name}/")
-
-    with right:
-        for row in rows:
-            if only and not row.needs_check:
-                continue
-            if row.needs_check:
-                tags = " · ".join(dict.fromkeys(_TONE[m.kind][1] for m in row.marks))
-                st.markdown(
-                    f'<div class="lab">บรรทัด {row.index + 1} · {tags}</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown(_render(row), unsafe_allow_html=True)
 
 
 def view_review(pages: list[PageInfo], results: dict) -> None:
     st.subheader("ตรวจงาน")
-    st.markdown(
-        "<style>.num{background:#EEF0FF;color:#3730A3;border-radius:4px;"
-        "padding:0 .12em;font-weight:600}.shaky-line{background:#FDF1DF;"
-        "border-radius:4px;padding:.05em .15em}</style>",
-        unsafe_allow_html=True,
+    st.caption(
+        "ชี้เฉพาะจุดที่ควรดู แล้วเปิดภาพตรงจุดนั้นให้ — "
+        "ตัวเลขกินพื้นที่ 2.8% ของหน้าแต่ครอบคลุมความผิด 45%"
     )
     if not results:
         st.warning("ยังไม่มีผล OCR")
         return
 
-    # ยุบตัวเลือกไว้ในกล่อง เลือกครั้งเดียวตอนเริ่มแล้วไม่ต้องแตะอีก
-    # ของเดิมวางค้างไว้บนสุดตลอด กินที่ที่ควรเป็นของภาพครอป
-    with st.expander("เลือกงานที่จะตรวจ", expanded=False):
-        top = st.columns([1.8, 2.2, 1.4])
-        engine = top[0].selectbox("ผลของ", sorted(results), key="rv_engine")
-        ok_pages = [p for p in pages if (sp := results[engine].get(p.page_id)) and sp.ok]
-        if not ok_pages:
-            st.info(f"`{engine}` ยังไม่ได้อ่านหน้าไหนเลย")
-            return
+    st.markdown(
+        "<style>.num{background:#EEF0FF;color:#3730A3;border-radius:4px;padding:0 .12em;"
+        "font-weight:600}.shaky-line{background:#FDF1DF;border-radius:4px;"
+        "padding:.05em .15em}</style>",
+        unsafe_allow_html=True,
+    )
 
-        docs = sorted({p.doc_name for p in ok_pages})
-        doc = top[1].selectbox(
-            "เอกสาร", docs, key="rv_doc", format_func=lambda d: short_doc(d, 36)
-        )
-        subset = [p for p in ok_pages if p.doc_name == doc]
+    top = st.columns([1.8, 2.2, 1.6])
+    engine = top[0].selectbox("ผลของ", sorted(results), key="rv_engine")
+    ok_pages = [p for p in pages if (sp := results[engine].get(p.page_id)) and sp.ok]
+    if not ok_pages:
+        st.info(f"`{engine}` ยังไม่ได้อ่านหน้าไหนเลย")
+        return
 
-        # ใช้ page_id เป็นค่า ไม่ใช่ PageInfo — Streamlit จำค่าที่เลือกตามคีย์
-        # พอสลับ engine แล้วชุดหน้าเปลี่ยน ค่าเก่าค้างแล้วหาไม่เจอ พังทั้งแท็บ
-        by_id = {p.page_id: p for p in subset}
-        page_id = top[2].selectbox(
-            "หน้า",
-            list(by_id),
-            key="rv_page",
-            format_func=lambda k: f"หน้า {by_id[k].page_no}",
-        )
-        if page_id not in by_id:
-            page_id = next(iter(by_id))
-        picked = by_id[page_id]
+    docs = sorted({p.doc_name for p in ok_pages})
+    doc = top[1].selectbox(
+        "เอกสาร", docs, key="rv_doc", format_func=lambda d: short_doc(d, 36)
+    )
+    subset = [p for p in ok_pages if p.doc_name == doc]
+
+    # ใช้ page_id เป็นค่าในช่องเลือก ไม่ใช่ตัว PageInfo — Streamlit จำค่าที่เลือกไว้
+    # ตามคีย์ พอสลับ engine แล้วรายการหน้าเปลี่ยน ค่าเก่าที่เป็นอ็อบเจกต์ยังค้างอยู่
+    # แล้วไปหาใน results ไม่เจอ (KeyError: doc7cdd41_p001 ตอนสลับไป +clean
+    # ซึ่งอ่านคนละชุดหน้า) สตริงเทียบตรงไปตรงมา Streamlit จึงรีเซ็ตให้เองถูก
+    by_id = {p.page_id: p for p in subset}
+    page_id = top[2].selectbox(
+        "หน้า",
+        list(by_id),
+        key="rv_page",
+        format_func=lambda k: f"หน้า {by_id[k].page_no}",
+    )
+    # กันไว้อีกชั้น เผื่อค่าที่จำไว้รอดผ่านมาได้ — ยอมรีเซ็ตดีกว่าพังทั้งหน้า
+    if page_id not in by_id:
+        page_id = next(iter(by_id))
+    picked = by_id[page_id]
 
     stored = results[engine].get(picked.page_id)
     if stored is None or not stored.ok:
         st.info(f"`{engine}` ยังไม่ได้อ่านหน้านี้ — เลือกหน้าอื่นหรือสั่งสแกนก่อน")
         return
-
-    saved = markdown_out.load_page(picked.page_id, engine)
+    raw_lines = stored.lines
+    _saved = markdown_out.load_page(picked.page_id, engine)
     lines = (
-        [ln for ln in saved.splitlines() if ln.strip()]
-        if saved is not None
-        else stored.lines
+        [ln for ln in _saved.splitlines() if ln.strip()] if _saved is not None
+        else raw_lines
     )
     thai_doc = thai_digit_by_document(
         {p: results[engine][p].lines for p in results[engine] if results[engine][p].ok}
@@ -274,17 +189,105 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
     )
     s = review.summary(rows)
 
+    c = st.columns(4)
+    c[0].metric("บรรทัดทั้งหมด", s["lines"])
+    c[1].metric("ต้องตรวจ", s["to_check"], f"ข้ามได้ {s['lines'] - s['to_check']}",
+                delta_color="off")
+    c[2].metric("ตัวเลข", s["digits"] + s["mixed"],
+                f"ผิดแน่ {s['mixed']}" if s["mixed"] else "เทียบกับภาพ", delta_color="off")
+    c[3].metric("ไม่นิ่ง", s["shaky"],
+                "จากการอ่านซ้ำ" if s["shaky"] else "ยังไม่ได้วัด", delta_color="off")
+
+    note = f"ยืมพิกัดจาก `{donor}` — ได้ {s['with_box']}/{s['lines']} บรรทัด" if donor \
+        else "ไม่มี engine ที่คืนพิกัดสำหรับหน้านี้ จึงกดดูภาพตรงจุดไม่ได้"
     st.caption(
-        f"{short_doc(picked.doc_name, 40)} · หน้า {picked.page_no} · `{engine}` — "
-        f"ต้องตรวจ {s['to_check']} จาก {s['lines']} บรรทัด"
-        + (f" · ผิดแน่ {s['mixed']} จุด" if s["mixed"] else "")
+        f"{note} · engine ที่ยืมมามีหน้าที่บอกตำแหน่งอย่างเดียว ไม่มีสิทธิ์แก้ข้อความ"
     )
+    st.divider()
+
+    ctl = st.columns([2, 2])
+    only = ctl[0].toggle("แสดงเฉพาะบรรทัดที่ต้องตรวจ", value=True, key="rv_only")
+    editing = ctl[1].toggle(
+        "เปิดโหมดแก้ข้อความ", value=False, key="rv_edit",
+        help="แก้ได้ทีละบรรทัดตรงจุดที่ mark โดยดูภาพครอปประกอบ",
+    )
+
+    # ข้อความที่เคยแก้ไว้ทับผลดิบ — ตัวเดียวกับที่แท็บเปรียบเทียบและ markdown ใช้
+    saved = markdown_out.load_page(picked.page_id, engine)
+    if saved is not None:
+        st.info(
+            f"หน้านี้มีฉบับที่แก้ไว้แล้ว {len(saved.splitlines())} บรรทัด "
+            "— ข้อความด้านล่างเป็นฉบับที่แก้แล้ว"
+        )
+
+    left, right = st.columns([1, 1.15])
 
     img_dir = CLEAN_IMAGE_DIR if engine.endswith("+clean") else IMAGE_DIR
     img = img_dir / f"{picked.page_id}.png"
+    with left:
+        with st.container(border=True):
+            if img.exists():
+                uri, w, h = cached_image(img)
+                st.markdown(
+                    f'<img src="{uri}" style="width:100%;border-radius:.4rem">',
+                    unsafe_allow_html=True,
+                )
+                st.caption(f"ภาพที่ engine อ่านจริง ({img_dir.name}/)")
+            else:
+                st.warning(f"ไม่พบภาพใน {img_dir.name}/")
 
-    focus, whole = st.tabs(["ตรวจทีละจุด", "ดูทั้งหน้า"])
-    with focus:
-        _focus_mode(picked, engine, rows, img, saved, lines)
-    with whole:
-        _page_mode(picked, engine, rows, img, s, donor)
+    with right:
+        shown = 0
+        edits: dict[int, str] = {}
+        for row in rows:
+            if only and not row.needs_check:
+                continue
+            shown += 1
+            if row.needs_check:
+                tags = " · ".join(
+                    dict.fromkeys(_TONE[m.kind][1] for m in row.marks)
+                )
+                st.markdown(
+                    f'<div class="lab">บรรทัด {row.index + 1} · {tags}</div>',
+                    unsafe_allow_html=True,
+                )
+            if editing and row.needs_check:
+                # ภาพครอปกางไว้เลยตอนแก้ ไม่ซ่อนใต้ปุ่ม — คนกำลังเทียบตัวอักษร
+                # ทีละตัว ถ้าต้องกดเปิดทุกบรรทัดจะเสียจังหวะ
+                if row.box:
+                    uri = rescue_crop_uri(str(img), tuple(row.box))
+                    if uri:
+                        st.markdown(
+                            f'<img src="{uri}" style="width:100%;border-radius:.4rem;'
+                            f'border:1px solid var(--border)">',
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.caption("ไม่มีภาพครอป — จับคู่พิกัดกับ engine ที่คืนตำแหน่งไม่ติด")
+                edits[row.index] = st.text_input(
+                    f"บรรทัด {row.index + 1}",
+                    value=row.text,
+                    key=f"rv_line·{picked.page_id}·{engine}·{row.index}",
+                    label_visibility="collapsed",
+                )
+                st.markdown("---")
+            else:
+                st.markdown(_render(row), unsafe_allow_html=True)
+                if row.needs_check and row.box:
+                    with st.popover("ดูภาพตรงจุดนี้", width="content"):
+                        uri = rescue_crop_uri(str(img), tuple(row.box))
+                        if uri:
+                            st.markdown(
+                                f'<img src="{uri}" style="width:100%;'
+                                f'border-radius:.4rem;'
+                                f'border:1px solid var(--border)">',
+                                unsafe_allow_html=True,
+                            )
+                            st.caption("ครอปบรรทัดนี้แล้วขยาย")
+                elif row.needs_check:
+                    st.caption("ยืมพิกัดบรรทัดนี้ไม่ได้ — จับคู่กับ engine ที่คืนพิกัดไม่ติด")
+        if not shown:
+            st.success("ไม่มีบรรทัดไหนเข้าเงื่อนไข — ไม่ได้แปลว่าอ่านถูกหมด")
+
+        if editing:
+            _save_bar(picked.page_id, engine, lines, edits, saved is not None)
