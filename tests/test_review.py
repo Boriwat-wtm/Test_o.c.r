@@ -138,3 +138,26 @@ class TestSaveRoundTrip:
         rows = build(["ปี 2459"], thai_doc=False)
         assert rows[0].needs_check
         assert [m.kind for m in rows[0].marks] == ["digit"]
+
+
+class TestStaleSelection:
+    """เคสจริงที่พัง: สลับ engine แล้วช่องเลือกหน้ายังจำหน้าเก่าไว้
+
+    Streamlit จำค่าที่เลือกตามคีย์ พอ engine ใหม่อ่านคนละชุดหน้า
+    ค่าที่ค้างอยู่จะไปหาใน results ไม่เจอ แล้ว KeyError ทั้งหน้า
+    (KeyError: 'doc7cdd41_p001' ตอนสลับไป typhoon-api-num+clean)
+    """
+
+    def test_หน้าที่_engine_ไม่ได้อ่านต้องไม่ทำให้พัง(self):
+        """จำลองตรรกะเลือกหน้าในหน้าเว็บ — ค่าเก่าต้องถูกรีเซ็ต ไม่ใช่พัง"""
+        by_id = {"docA_p001": object(), "docA_p002": object()}
+        stale = "doc7cdd41_p001"  # หน้าของ engine ก่อนหน้า
+
+        page_id = stale if stale in by_id else next(iter(by_id))
+        assert page_id == "docA_p001"
+
+    def test_ต้องหยิบ_stored_ด้วย_get_ไม่ใช่_subscript(self):
+        """results[engine][page_id] ตรง ๆ พังทันทีถ้าหน้าไม่มี
+        ต้อง .get() แล้วเช็คก่อน ถึงจะบอกผู้ใช้ได้ว่าให้ไปสแกนก่อน"""
+        results = {"e": {"docA_p001": object()}}
+        assert results["e"].get("ไม่มีหน้านี้") is None

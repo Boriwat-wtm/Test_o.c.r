@@ -147,11 +147,28 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
         "เอกสาร", docs, key="rv_doc", format_func=lambda d: short_doc(d, 36)
     )
     subset = [p for p in ok_pages if p.doc_name == doc]
-    picked = top[2].selectbox(
-        "หน้า", subset, key="rv_page", format_func=lambda p: f"หน้า {p.page_no}"
-    )
 
-    raw_lines = results[engine][picked.page_id].lines
+    # ใช้ page_id เป็นค่าในช่องเลือก ไม่ใช่ตัว PageInfo — Streamlit จำค่าที่เลือกไว้
+    # ตามคีย์ พอสลับ engine แล้วรายการหน้าเปลี่ยน ค่าเก่าที่เป็นอ็อบเจกต์ยังค้างอยู่
+    # แล้วไปหาใน results ไม่เจอ (KeyError: doc7cdd41_p001 ตอนสลับไป +clean
+    # ซึ่งอ่านคนละชุดหน้า) สตริงเทียบตรงไปตรงมา Streamlit จึงรีเซ็ตให้เองถูก
+    by_id = {p.page_id: p for p in subset}
+    page_id = top[2].selectbox(
+        "หน้า",
+        list(by_id),
+        key="rv_page",
+        format_func=lambda k: f"หน้า {by_id[k].page_no}",
+    )
+    # กันไว้อีกชั้น เผื่อค่าที่จำไว้รอดผ่านมาได้ — ยอมรีเซ็ตดีกว่าพังทั้งหน้า
+    if page_id not in by_id:
+        page_id = next(iter(by_id))
+    picked = by_id[page_id]
+
+    stored = results[engine].get(picked.page_id)
+    if stored is None or not stored.ok:
+        st.info(f"`{engine}` ยังไม่ได้อ่านหน้านี้ — เลือกหน้าอื่นหรือสั่งสแกนก่อน")
+        return
+    raw_lines = stored.lines
     _saved = markdown_out.load_page(picked.page_id, engine)
     lines = (
         [ln for ln in _saved.splitlines() if ln.strip()] if _saved is not None
