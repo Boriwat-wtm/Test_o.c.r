@@ -97,3 +97,44 @@ class TestSummary:
         assert s["to_check"] == 1
         assert s["mixed"] == 1
         assert s["shaky"] == 1
+
+
+class TestSaveRoundTrip:
+    """วงจรแก้แล้วบันทึก — ต้องอ่านกลับมาได้และไม่ทำบรรทัดอื่นหาย"""
+
+    def test_บันทึกทั้งหน้าไม่ใช่เฉพาะบรรทัดที่แก้(self, tmp_path, monkeypatch):
+        from thai_ocr_bench import markdown_out
+
+        monkeypatch.setattr(markdown_out, "EXPORT_DIR", tmp_path, raising=False)
+        monkeypatch.setattr(
+            markdown_out, "page_path_for",
+            lambda pid, eng: tmp_path / f"{pid}·{eng}.md",
+        )
+
+        lines = ["บรรทัดหนึ่ง", "ปี 2458", "บรรทัดสาม"]
+        edits = {1: "ปี 2459"}
+        merged = [edits.get(i, ln) for i, ln in enumerate(lines)]
+        markdown_out.save_page("p1", "e", "\n".join(merged))
+
+        got = markdown_out.load_page("p1", "e")
+        assert got is not None
+        assert got.splitlines() == ["บรรทัดหนึ่ง", "ปี 2459", "บรรทัดสาม"]
+
+    def test_ล้างแล้วกลับไปใช้ผลดิบ(self, tmp_path, monkeypatch):
+        from thai_ocr_bench import markdown_out
+
+        monkeypatch.setattr(
+            markdown_out, "page_path_for",
+            lambda pid, eng: tmp_path / f"{pid}·{eng}.md",
+        )
+        markdown_out.save_page("p1", "e", "แก้แล้ว")
+        assert markdown_out.load_page("p1", "e") == "แก้แล้ว"
+        markdown_out.clear_page("p1", "e")
+        assert markdown_out.load_page("p1", "e") is None
+
+    def test_แก้แล้ว_mark_ตัวเลขยังทำงานกับข้อความใหม่(self):
+        """หลังแก้ 2458 เป็น 2459 บรรทัดนั้นต้องยังถูก mark ว่าเป็นตัวเลข
+        เพราะยังต้องเทียบกับภาพอยู่ ไม่ใช่หายไปเพราะแก้แล้ว"""
+        rows = build(["ปี 2459"], thai_doc=False)
+        assert rows[0].needs_check
+        assert [m.kind for m in rows[0].marks] == ["digit"]

@@ -16,7 +16,7 @@ import json
 
 import streamlit as st
 
-from .. import review
+from .. import markdown_out, review
 from ..config import IMAGE_DIR, CLEAN_IMAGE_DIR, RESULTS_DIR
 from ..render import PageInfo
 from ..suspect import thai_digit_by_document
@@ -86,6 +86,38 @@ def _render(row: review.ReviewLine) -> str:
     return f'<div class="ln">{inner}</div>'
 
 
+def _save_bar(
+    page_id: str, engine: str, lines: list[str], edits: dict[int, str], has_saved: bool
+) -> None:
+    """ปุ่มบันทึก — เขียนทั้งหน้า ไม่ใช่เฉพาะบรรทัดที่แก้
+
+    ต้องเก็บทั้งหน้าเพราะไฟล์นี้เป็นฉบับที่คนแก้แล้วของหน้านั้น แท็บ markdown
+    จะหยิบไปใช้แทนผลดิบตอนส่งออก ถ้าเก็บแต่บรรทัดที่แก้ ที่เหลือจะหายไป
+    """
+    changed = {i: v for i, v in edits.items() if i < len(lines) and v != lines[i]}
+    st.divider()
+    cols = st.columns([1.4, 1.4, 2.2])
+    if cols[0].button(
+        f"บันทึก {len(changed)} บรรทัดที่แก้" if changed else "บันทึก",
+        type="primary",
+        disabled=not changed,
+        key=f"rv_save·{page_id}",
+    ):
+        merged = [edits.get(i, ln) for i, ln in enumerate(lines)]
+        markdown_out.save_page(page_id, engine, "\n".join(merged))
+        st.success(f"บันทึกแล้ว {len(changed)} บรรทัด")
+        st.rerun()
+
+    if has_saved and cols[1].button("ล้างฉบับที่แก้", key=f"rv_reset·{page_id}"):
+        markdown_out.clear_page(page_id, engine)
+        st.rerun()
+
+    cols[2].caption(
+        "บันทึกแล้วแท็บ markdown จะใช้ฉบับนี้แทนผลดิบตอนส่งออก "
+        "· ผลดิบเดิมไม่ถูกแก้ ย้อนกลับได้เสมอ"
+    )
+
+
 def view_review(pages: list[PageInfo], results: dict) -> None:
     st.subheader("ตรวจงาน")
     st.caption(
@@ -119,7 +151,12 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
         "หน้า", subset, key="rv_page", format_func=lambda p: f"หน้า {p.page_no}"
     )
 
-    lines = results[engine][picked.page_id].lines
+    raw_lines = results[engine][picked.page_id].lines
+    _saved = markdown_out.load_page(picked.page_id, engine)
+    lines = (
+        [ln for ln in _saved.splitlines() if ln.strip()] if _saved is not None
+        else raw_lines
+    )
     thai_doc = thai_digit_by_document(
         {p: results[engine][p].lines for p in results[engine] if results[engine][p].ok}
     ).get(picked.page_id)
@@ -151,7 +188,21 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
     )
     st.divider()
 
-    only = st.toggle("แสดงเฉพาะบรรทัดที่ต้องตรวจ", value=True, key="rv_only")
+    ctl = st.columns([2, 2])
+    only = ctl[0].toggle("แสดงเฉพาะบรรทัดที่ต้องตรวจ", value=True, key="rv_only")
+    editing = ctl[1].toggle(
+        "เปิดโหมดแก้ข้อความ", value=False, key="rv_edit",
+        help="แก้ได้ทีละบรรทัดตรงจุดที่ mark โดยดูภาพครอปประกอบ",
+    )
+
+    # ข้อความที่เคยแก้ไว้ทับผลดิบ — ตัวเดียวกับที่แท็บเปรียบเทียบและ markdown ใช้
+    saved = markdown_out.load_page(picked.page_id, engine)
+    if saved is not None:
+        st.info(
+            f"หน้านี้มีฉบับที่แก้ไว้แล้ว {len(saved.splitlines())} บรรทัด "
+            "— ข้อความด้านล่างเป็นฉบับที่แก้แล้ว"
+        )
+
     left, right = st.columns([1, 1.15])
 
     img_dir = CLEAN_IMAGE_DIR if engine.endswith("+clean") else IMAGE_DIR
@@ -170,6 +221,7 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
 
     with right:
         shown = 0
+        edits: dict[int, str] = {}
         for row in rows:
             if only and not row.needs_check:
                 continue
@@ -182,9 +234,10 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
                     f'<div class="lab">บรรทัด {row.index + 1} · {tags}</div>',
                     unsafe_allow_html=True,
                 )
-            st.markdown(_render(row), unsafe_allow_html=True)
-            if row.needs_check and row.box:
-                with st.popover("ดูภาพตรงจุดนี้", width="content"):
+            if editing and row.needs_check:
+                # ภาพครอปกางไว้เลยตอนแก้ ไม่ซ่อนใต้ปุ่ม — คนกำลังเทียบตัวอักษร
+                # ทีละตัว ถ้าต้องกดเปิดทุกบรรทัดจะเสียจังหวะ
+                if row.box:
                     uri = rescue_crop_uri(str(img), tuple(row.box))
                     if uri:
                         st.markdown(
@@ -192,8 +245,32 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
                             f'border:1px solid var(--border)">',
                             unsafe_allow_html=True,
                         )
-                        st.caption("ครอปบรรทัดนี้แล้วขยาย")
-            elif row.needs_check:
-                st.caption("ยืมพิกัดบรรทัดนี้ไม่ได้ — จับคู่กับ engine ที่คืนพิกัดไม่ติด")
+                else:
+                    st.caption("ไม่มีภาพครอป — จับคู่พิกัดกับ engine ที่คืนตำแหน่งไม่ติด")
+                edits[row.index] = st.text_input(
+                    f"บรรทัด {row.index + 1}",
+                    value=row.text,
+                    key=f"rv_line·{picked.page_id}·{engine}·{row.index}",
+                    label_visibility="collapsed",
+                )
+                st.markdown("---")
+            else:
+                st.markdown(_render(row), unsafe_allow_html=True)
+                if row.needs_check and row.box:
+                    with st.popover("ดูภาพตรงจุดนี้", width="content"):
+                        uri = rescue_crop_uri(str(img), tuple(row.box))
+                        if uri:
+                            st.markdown(
+                                f'<img src="{uri}" style="width:100%;'
+                                f'border-radius:.4rem;'
+                                f'border:1px solid var(--border)">',
+                                unsafe_allow_html=True,
+                            )
+                            st.caption("ครอปบรรทัดนี้แล้วขยาย")
+                elif row.needs_check:
+                    st.caption("ยืมพิกัดบรรทัดนี้ไม่ได้ — จับคู่กับ engine ที่คืนพิกัดไม่ติด")
         if not shown:
             st.success("ไม่มีบรรทัดไหนเข้าเงื่อนไข — ไม่ได้แปลว่าอ่านถูกหมด")
+
+        if editing:
+            _save_bar(picked.page_id, engine, lines, edits, saved is not None)
