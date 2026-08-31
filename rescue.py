@@ -41,6 +41,17 @@ from thai_ocr_bench.truth import find_repeating_lines
 REPORT_FILE = "rescue.json"
 
 
+def report_path_for(engine: str) -> Path:
+    """แฟ้มผลแยกตาม engine — rescue.json เดิมเก็บได้ทีละตัวเท่านั้น
+
+    รัน engine ที่สองทับตัวแรกแล้วผลตัวแรกหายทันที ซึ่งเจอจริงตอนจะเทียบ
+    ความนิ่งของ typhoon-2b กับ typhoon-api ยังเขียน rescue.json ต่อไปด้วย
+    เพราะแท็บเดิมอ่านไฟล์นั้นอยู่ ให้หมายถึง "รอบล่าสุด"
+    """
+    safe = engine.replace("+", "_").replace("/", "_")
+    return RESULTS_DIR / f"rescue_{safe}.json"
+
+
 @dataclass
 class Rescued:
     page_id: str
@@ -187,15 +198,15 @@ def main() -> None:
                 for j, v in enumerate(variants, 1):
                     print(f"      รอบ {j}: {v[:70]}")
 
-    path = RESULTS_DIR / REPORT_FILE
-    path.write_text(
-        json.dumps(
-            {"engine": args.engine, "items": [asdict(r) for r in out]},
-            ensure_ascii=False,
-            indent=1,
-        ),
-        encoding="utf-8",
+    payload = json.dumps(
+        {"engine": args.engine, "items": [asdict(r) for r in out]},
+        ensure_ascii=False,
+        indent=1,
     )
+    path = RESULTS_DIR / REPORT_FILE
+    path.write_text(payload, encoding="utf-8")
+    # เก็บสำเนาแยกตาม engine ไว้ด้วย ไม่งั้นรันตัวถัดไปทับแล้วผลตัวก่อนหายเลย
+    report_path_for(args.engine).write_text(payload, encoding="utf-8")
     changed = sum(1 for r in out if r.changed)
     failed = sum(1 for r in out if r.error)
     unstable = sum(1 for r in out if r.agree is False)

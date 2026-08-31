@@ -20,6 +20,7 @@ from thai_ocr_bench.ui.images import view_images
 from thai_ocr_bench.ui.markdown_view import view_markdown
 from thai_ocr_bench.ui.rescue_view import view_rescue
 from thai_ocr_bench.ui.scan import progress_banner, scan_panel
+from thai_ocr_bench.ui.stability import view_stability
 from thai_ocr_bench.ui.summary import view_summary
 from thai_ocr_bench.ui.suspects import view_suspects
 from thai_ocr_bench.ui.theme import CSS
@@ -37,6 +38,7 @@ TABS: list[tuple[str, str]] = [
     ("✏️ ทำเฉลย", "truth"),
     ("🖼️ ตรวจภาพ", "images"),
     ("🔎 อ่านซ้ำแบบซูม", "rescue"),
+    ("🎯 วัดความนิ่ง", "stability"),
     ("📝 markdown", "markdown"),
     ("🧾 ประวัติการรัน", "history"),
 ]
@@ -94,6 +96,7 @@ def main() -> None:
         "truth": lambda: view_truth(pages, results),
         "images": lambda: view_images(pages),
         "rescue": lambda: view_rescue(pages, results),
+        "stability": lambda: view_stability(pages, results),
         "markdown": lambda: view_markdown(pages, results),
         "history": view_history,
     }
