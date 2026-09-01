@@ -317,15 +317,21 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
     ตอนนี้เลขบรรทัดอยู่ริมซ้ายเป็นแถบ gutter บรรทัดที่ต้อง mark มีพื้นหลังจาง
     ข้อมูลว่าทำไมถึง mark ย้ายไปอยู่ใน tooltip ของช่วงที่ระบายสี
     """
-    bar = st.columns([1.3, 1.4, 1.6])
+    bar = st.columns([1.3, 1.6, 1.6])
     editing = bar[0].toggle("แก้ข้อความ", value=False, key="rv_edit")
-    only = bar[1].toggle("เฉพาะที่ต้องตรวจ", value=True, key="rv_only")
+    # ตอนแก้ต้องแสดงทุกบรรทัด ไม่งั้นเลขบรรทัดด้านบนไม่ตรงกับในช่องพิมพ์
+    # (ด้านบนกรองเหลือบางบรรทัด แต่ช่องพิมพ์มีครบทุกบรรทัดเสมอ)
+    only = bar[1].toggle(
+        "เฉพาะที่ต้องตรวจ",
+        value=True,
+        key="rv_only",
+        disabled=editing,
+        help="ปิดเองตอนแก้ข้อความ เพื่อให้เลขบรรทัดตรงกับช่องพิมพ์",
+    )
+    if editing:
+        only = False
     if saved is not None:
         bar[2].caption(f"มีฉบับที่แก้ไว้ {len(lines)} บรรทัด")
-
-    if editing:
-        _edit_panel(picked, engine, lines, saved)
-        return
 
     shown = [r for r in rows if r.needs_check or not only]
     if not shown:
@@ -361,6 +367,12 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
     if hints:
         st.caption("แก้ได้เลยโดยไม่ต้องดูภาพ — " + " · ".join(hints[:6]))
 
+    # ช่องพิมพ์วางต่อท้ายมุมมองอ่าน ไม่ใช่แทนที่
+    # เดิมกดแก้แล้วไฮไลต์หายหมด กลายเป็นข้อความเปล่า ๆ ไม่รู้ว่าต้องแก้ตรงไหน
+    # ต้องปิดโหมดแก้ไปดู แล้วเปิดกลับมาแก้ ซึ่งจำไม่ไหวว่าบรรทัดไหนบ้าง
+    if editing:
+        _edit_panel(picked, engine, lines, saved)
+
     if s["with_box"] < s["lines"]:
         st.caption(
             f"ยืมพิกัดได้ {s['with_box']}/{s['lines']} บรรทัด — "
@@ -369,11 +381,17 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
 
 
 def _edit_panel(picked, engine, lines: list[str], saved: str | None) -> None:
-    """แก้ทั้งหน้าในช่องเดียว ไม่ใช่ช่องละบรรทัด
+    """ช่องพิมพ์ทั้งหน้า วางไว้ใต้มุมมองอ่าน ไม่ใช่แทนที่
 
     ช่องละบรรทัดทำให้ย้ายข้อความข้ามบรรทัดไม่ได้ ซึ่งจำเป็นเวลา OCR
     หั่นบรรทัดผิดที่ — เคสที่เจอบ่อยกับ engine ที่ตีกรอบพลาด
+
+    ต้องเห็นมุมมองอ่านพร้อมกันด้วย เพราะช่องพิมพ์เป็นข้อความเปล่า ไม่มีไฮไลต์
+    บอกว่าจุดไหนต้องแก้ ถ้าซ่อนมุมมองอ่านไป คนจะต้องปิดโหมดแก้ไปดูว่าบรรทัดไหน
+    แล้วเปิดกลับมาแก้ ซึ่งจำไม่ไหวเมื่อมีหลายจุด
     """
+    st.markdown("---")
+    st.caption("พิมพ์แก้ได้เลย — เทียบกับที่ระบายสีด้านบน")
     text = st.text_area(
         "ข้อความทั้งหน้า",
         value="\n".join(lines),
