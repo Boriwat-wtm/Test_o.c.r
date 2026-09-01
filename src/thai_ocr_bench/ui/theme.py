@@ -18,6 +18,7 @@ CSS = """
   :root {
     --ink: #14161B;
     --ink-soft: #5B5F6B;
+    --paper: #FFFFFF;
     --surface-2: #F5F6F8;
     --border: #E4E6EC;
     --accent: #4F46E5;
@@ -28,6 +29,12 @@ CSS = """
     --warn-bg: #FDF1DF;   --warn-ink: #93630A;
     --bad-bg:  #FCE7EA;   --bad-ink:  #B0123B;
     --mono: "JetBrains Mono", ui-monospace, Consolas, "Cascadia Mono", monospace;
+
+    /* สีของ "ชนิดจุดที่ต้องตรวจ" — ใช้ร่วมกันระหว่างกรอบบนภาพกับข้อความ
+       ถ้าสองฝั่งใช้คนละชุด คนจะจับคู่กรอบกับบรรทัดไม่ได้ ซึ่งเป็นหัวใจของหน้าตรวจงาน */
+    --rv-digit: #4F46E5;  --rv-digit-bg: #EEF0FF;
+    --rv-mixed: #B0123B;  --rv-mixed-bg: #FCE7EA;
+    --rv-shaky: #B45309;  --rv-shaky-bg: #FDF1DF;
   }
 
   /* ข้อความ OCR ที่ไฮไลต์จุดผิด — line-height สูงตั้งใจ ไม่ให้สระ/วรรณยุกต์ไทยที่

@@ -7,6 +7,9 @@
 ต่างจากแท็บ "จุดน่าสงสัย" ตรงที่ไม่พึ่ง engine อื่นมาตัดสินข้อความ
 วัดแล้วการโหวตข้าม engine จับผิดได้แค่ 2% เพราะเอาตัวที่แม่นน้อยกว่า
 มาตัดสินตัวที่แม่นที่สุด ตรงนี้ engine อื่นมีหน้าที่เดียวคือบอกพิกัด
+
+หลักการจัดหน้า: สีหนึ่งสีมีความหมายเดียวทั้งหน้า และความหมายนั้นเขียนไว้
+ให้อ่านได้ตลอดเวลา ไม่ใช่ต้องชี้เมาส์ถาม — ป้ายด้านบนจึงเป็นทั้งตัวนับและคำอธิบายสี
 """
 
 from __future__ import annotations
@@ -26,59 +29,149 @@ from .common import cached_image, peek_uri, short_doc
 # ตัวที่คืนพิกัดข้อความ เรียงตามความน่าเชื่อถือของกรอบที่วัดมา
 _DONORS = ("tesseract-tha", "paddle-th", "easyocr-th")
 
+# ชนิดจุด → (ชื่อที่คนอ่าน, สิ่งที่ต้องทำกับมัน) เรียงตามความด่วน
+# ข้อความคอลัมน์ที่สองคือหัวใจ: บอกว่าเห็นสีนี้แล้วต้องทำอะไร ไม่ใช่แค่ว่ามันคืออะไร
 _KIND = {
-    "digit": ("num", "ตัวเลข", "#4F46E5"),
-    "mixed": ("bad", "ผิดแน่", "#B0123B"),
-    "shaky": ("warn", "ไม่นิ่ง", "#B45309"),
+    "mixed": ("ผิดแน่", "แก้ได้เลย"),
+    "shaky": ("ไม่นิ่ง", "อ่าน ๓ รอบไม่ตรงกัน"),
+    "digit": ("ตัวเลข", "เทียบกับภาพ"),
 }
 _ARABIC_TO_THAI = str.maketrans("0123456789", THAI_DIGITS)
 
 CSS = """
 <style>
+/* ── ภาพหน้าเอกสาร + กรอบชี้จุด ─────────────────────────────── */
+.rv-stick{position:sticky;top:.6rem}
 .stu-wrap{position:relative;line-height:0}
-.stu-wrap img{width:100%;border-radius:.5rem;display:block}
+.stu-wrap img{width:100%;border-radius:var(--radius-sm);display:block;
+  border:1px solid var(--border)}
 .stu-wrap svg{position:absolute;inset:0;width:100%;height:100%}
 .stu-box{fill:none;stroke-width:6}
-.stu-box.k-digit{stroke:#4F46E5}
-.stu-box.k-mixed{stroke:#B0123B}
-.stu-box.k-shaky{stroke:#B45309}
-.stu-hit{fill:#4F46E5;opacity:.07}
-.stu-hit.k-mixed{fill:#B0123B;opacity:.10}
-.stu-hit.k-shaky{fill:#B45309;opacity:.10}
-.stu-no{font-family:ui-monospace,monospace;font-size:34px;font-weight:700}
-.num{background:#EEF0FF;color:#3730A3;border-radius:4px;padding:0 .12em;font-weight:600}
-.shaky-line{background:#FDF1DF;border-radius:4px;padding:.05em .15em}
-.stu-tag{display:inline-block;font-family:ui-monospace,monospace;font-size:10.5px;
-  font-weight:700;padding:.1rem .45rem;border-radius:999px;margin-right:.35rem}
-.stu-doc{border:1px solid var(--border,#E4E6EC);border-radius:.6rem;
-  padding:1rem 1.15rem;background:var(--paper,#fff)}
-.stu-row{display:flex;gap:.7rem;align-items:baseline;padding:.12rem 0}
-.stu-row.hit{background:rgba(79,70,229,.045);border-radius:.3rem;
-  margin:0 -.35rem;padding:.12rem .35rem}
-.stu-gut{font-family:ui-monospace,monospace;font-size:11px;color:#8C919E;
-  min-width:2.2em;text-align:right;flex:none;user-select:none}
+.stu-box.k-digit{stroke:var(--rv-digit)}
+.stu-box.k-mixed{stroke:var(--rv-mixed)}
+.stu-box.k-shaky{stroke:var(--rv-shaky)}
+.stu-hit.k-digit{fill:var(--rv-digit);opacity:.07}
+.stu-hit.k-mixed{fill:var(--rv-mixed);opacity:.10}
+.stu-hit.k-shaky{fill:var(--rv-shaky);opacity:.10}
+/* ขอบขาวรอบตัวเลขกำกับ — ไม่งั้นเลขจมไปกับตัวหนังสือในภาพเอกสารเวลาย่อ
+   สีต้องมาจากคลาส ไม่ใช่ attribute fill="var(...)" — เบราว์เซอร์ไม่ขยายตัวแปร
+   CSS ใน presentation attribute ของ SVG เลขจะกลายเป็นสีดำหมด */
+.stu-no{font-family:var(--mono);font-size:42px;font-weight:700;
+  stroke:#fff;stroke-width:6px;paint-order:stroke fill}
+.stu-no.k-digit{fill:var(--rv-digit)}
+.stu-no.k-mixed{fill:var(--rv-mixed)}
+.stu-no.k-shaky{fill:var(--rv-shaky)}
+
+/* ── แถบสรุปด้านบน — ตัวนับกับคำอธิบายสีเป็นอันเดียวกัน ─────── */
+.rv-head{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;
+  border:1px solid var(--border);border-radius:var(--radius);
+  padding:.7rem .95rem;background:var(--paper)}
+.rv-score{display:flex;align-items:baseline;gap:.5rem;padding-right:1rem;
+  border-right:1px solid var(--border)}
+.rv-big{font-family:var(--mono);font-size:29px;font-weight:700;line-height:1;
+  color:var(--ink)}
+.rv-cap{font-size:11.5px;line-height:1.5;color:var(--ink-soft)}
+.rv-cap b{display:block;font-weight:500;opacity:.75}
+.rv-keys{display:flex;gap:.4rem;flex-wrap:wrap}
+.rv-key{display:inline-flex;align-items:baseline;gap:.4rem;
+  padding:.32rem .7rem;border-radius:999px}
+.rv-key .n{font-family:var(--mono);font-size:14px;font-weight:700}
+.rv-key .l{font-size:12.5px;font-weight:600}
+.rv-key .w{font-size:11px;opacity:.72}
+.rv-key.k-digit{background:var(--rv-digit-bg);color:var(--rv-digit)}
+.rv-key.k-mixed{background:var(--rv-mixed-bg);color:var(--rv-mixed)}
+.rv-key.k-shaky{background:var(--rv-shaky-bg);color:var(--rv-shaky)}
+.rv-key.off{background:var(--surface-2);color:var(--ink-soft)}
+
+/* แผนที่บรรทัด — ขีดละบรรทัดเรียงตามหน้าจริง บอกว่าปัญหากระจุกอยู่ช่วงไหน
+   ตัวเลขรวมด้านบนบอกไม่ได้ว่า "๘ จุด" กองอยู่ย่อหน้าเดียวหรือกระจายทั้งหน้า */
+.rv-map{display:flex;gap:2px;height:13px;margin:.5rem .1rem 0;overflow:hidden}
+.rv-map i{flex:1;min-width:1px;border-radius:2px;background:var(--surface-2)}
+.rv-map i.k-digit{background:var(--rv-digit)}
+.rv-map i.k-mixed{background:var(--rv-mixed)}
+.rv-map i.k-shaky{background:var(--rv-shaky)}
+
+/* ── ป้ายบอกที่มาของภาพ/พิกัด ──────────────────────────────── */
+.rv-meta{display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.45rem}
+.rv-chip{font-size:11.5px;line-height:1.6;padding:.15rem .55rem;border-radius:999px;
+  background:var(--surface-2);color:var(--ink-soft);border:1px solid var(--border)}
+.rv-chip.mono{font-family:var(--mono);font-size:11px}
+.rv-chip.warn{background:var(--warn-bg);color:var(--warn-ink);border-color:#F0DCBA}
+.rv-chip.good{background:var(--good-bg);color:var(--good-ink);border-color:#C6E8D3}
+
+/* ── กล่องข้อความ ─────────────────────────────────────────── */
+.stu-doc{border:1px solid var(--border);border-radius:var(--radius);
+  padding:.8rem .9rem .8rem 0;background:var(--paper)}
+.stu-row{display:flex;gap:.6rem;align-items:baseline;position:relative;
+  padding:.2rem .5rem .2rem 0;border-left:3px solid transparent}
+.stu-row.hit.k-digit{border-left-color:var(--rv-digit);background:var(--rv-digit-bg)}
+.stu-row.hit.k-mixed{border-left-color:var(--rv-mixed);background:var(--rv-mixed-bg)}
+.stu-row.hit.k-shaky{border-left-color:var(--rv-shaky);background:var(--rv-shaky-bg)}
+/* บรรทัดที่ถูก mark ใช้เส้นขอบตอนชี้ ไม่ใช่พื้นหลัง — พื้นหลังจะทับสีชนิดจุด */
+.stu-row:hover{box-shadow:inset 0 0 0 1px var(--border);border-radius:0 .3rem .3rem 0}
+.stu-row:not(.hit):hover{background:var(--surface-2)}
+/* ช่องว่างตรงที่ตัวกรองซ่อนบรรทัดไว้ — ไม่งั้นเลขบรรทัดกระโดดโดยไม่มีสัญญาณ
+   แล้วคนจะนึกว่าเอกสารขาดหายไปจริง ๆ */
+.stu-gap{display:flex;align-items:center;gap:.55rem;user-select:none;
+  padding:.2rem .5rem .2rem 2.9rem;font-size:10.5px;color:var(--ink-soft);opacity:.6}
+.stu-gap::after{content:"";flex:1;height:1px;background:var(--border)}
+.stu-gut{font-family:var(--mono);font-size:11px;color:var(--ink-soft);opacity:.5;
+  min-width:2.3em;text-align:right;flex:none;user-select:none}
+.stu-row.hit .stu-gut{opacity:1;font-weight:700}
+.stu-row.hit.k-digit .stu-gut{color:var(--rv-digit)}
+.stu-row.hit.k-mixed .stu-gut{color:var(--rv-mixed)}
+.stu-row.hit.k-shaky .stu-gut{color:var(--rv-shaky)}
 .stu-txt{font-size:15.5px;line-height:1.95;word-break:break-word;flex:1}
+.num{background:var(--rv-digit-bg);color:#3730A3;border-radius:4px;
+  padding:0 .12em;font-weight:600;position:relative;cursor:help}
+/* ระบายพื้นทั้งบรรทัดเฉพาะตอนที่ "ไม่นิ่ง" เป็นชนิดหลักของบรรทัดนั้น
+   บรรทัดที่เป็นทั้งผิดแน่และไม่นิ่งจะได้ไม่มีเหลืองซ้อนแดงจนอ่านสีไม่ออก
+   ข้อมูลไม่หาย — ป้ายใต้ภาพ hover บอกครบทุกชนิดที่บรรทัดนั้นโดน */
+.stu-row.k-shaky .shaky-line{background:rgba(180,83,9,.11);
+  border-radius:4px;padding:.05em .15em}
 
-/* ภาพครอปเด้งเหนือบรรทัดที่ชี้ ไม่ใช่ตำแหน่งคงที่บนกล่อง
-   เคยลองวางไว้บนสุดของกล่องแล้ว แต่กล่องเลื่อนได้ พอชี้บรรทัดล่าง ๆ
-   ภาพจะอยู่นอกจอที่มองเห็น ต้องเลื่อนกลับขึ้นไปดูซึ่งไม่มีประโยชน์
+/* ทูลทิปในกล่องนี้เปิดลงล่างเสมอ เพราะด้านบนของบรรทัดถูกภาพ hover จองไว้แล้ว
+   (ของกลางใน theme.py เปิดขึ้นบน จึงต้องกลับด้านเฉพาะที่นี่) */
+.num::after{content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 7px);
+  transform:translateX(-50%);background:var(--ink);color:#F5F6F8;font-size:12px;
+  font-weight:500;line-height:1.5;padding:.35rem .6rem;border-radius:8px;
+  white-space:normal;max-width:250px;width:max-content;opacity:0;visibility:hidden;
+  pointer-events:none;transition:opacity .12s ease;z-index:70}
+.num:hover::after{opacity:1;visibility:visible}
+.stu-doc .wrong::after{bottom:auto;top:calc(100% + 7px)}
+.stu-doc .wrong::before{bottom:auto;top:100%;
+  border-top-color:transparent;border-bottom-color:var(--ink)}
 
-   กล่องจึงต้องไม่มี overflow ของตัวเอง (ให้หน้าเว็บเลื่อนแทน) ไม่งั้น
-   ภาพที่ลอยเหนือบรรทัดแรก ๆ จะถูก overflow ตัดหัวทิ้ง
+/* ── ภาพครอปเด้งเหนือบรรทัดที่ชี้ ไม่ใช่ตำแหน่งคงที่บนกล่อง ──
+   เคยลองวางไว้บนสุดของกล่องแล้ว แต่พอชี้บรรทัดล่าง ๆ ภาพจะอยู่นอกจอที่มองเห็น
+   กล่องจึงต้องไม่มี overflow ของตัวเอง ไม่งั้นภาพเหนือบรรทัดแรก ๆ ถูกตัดหัวทิ้ง
    ใช้ CSS ล้วน ไม่ง้อ JS เพราะ Streamlit ตัด script ที่ฝังมากับ markdown ทิ้ง */
-.stu-row{position:relative}
-.stu-peek{display:none;position:absolute;left:2.2rem;right:.2rem;
-  bottom:calc(100% + 6px);z-index:60;padding:.4rem;background:#fff;
-  border:1px solid #CFD3DD;border-radius:.5rem;
-  box-shadow:0 10px 30px rgba(20,22,27,.18)}
-/* สองบรรทัดแรกไม่มีที่ว่างข้างบน พลิกลงล่างแทน ไม่งั้นโผล่นอกกล่อง */
-.stu-row:nth-child(-n+2)>.stu-peek{bottom:auto;top:calc(100% + 6px)}
+.stu-peek{display:none;position:absolute;left:2.9rem;bottom:calc(100% + 9px);
+  z-index:60;width:min(620px,calc(100% - 3.2rem));padding:.4rem;
+  background:var(--paper);border:1px solid var(--border);
+  border-radius:var(--radius-sm);box-shadow:0 12px 34px rgba(20,22,27,.20)}
+.stu-peek::after{content:"";position:absolute;left:1.5rem;top:100%;
+  border:7px solid transparent;border-top-color:var(--border)}
+/* สองบรรทัดแรกไม่มีที่ว่างข้างบน พลิกลงล่างแทน ลูกศรพลิกตาม
+   คลาส .dn ติดมาจากฝั่ง Python ไม่ใช่ :nth-child เพราะมีตัวคั่น .stu-gap
+   แทรกอยู่ในกล่องด้วย การนับลูกตามลำดับจึงชี้ผิดตัวเมื่อเปิดตัวกรอง */
+.stu-row.dn>.stu-peek{bottom:auto;top:calc(100% + 9px)}
+.stu-row.dn>.stu-peek::after{top:auto;bottom:100%;
+  border-top-color:transparent;border-bottom-color:var(--border)}
 .stu-peek img{display:block;width:100%;border-radius:.3rem}
-.stu-peek .cap{font-family:ui-monospace,monospace;font-size:11px;
-  color:#5B5F6B;padding:.3rem .1rem 0}
+.stu-peek .cap{display:flex;gap:.4rem;align-items:center;font-size:11px;
+  color:var(--ink-soft);padding:.35rem .15rem 0}
+.stu-peek .cap b{font-family:var(--mono);font-weight:700;color:var(--ink)}
 .stu-row:hover>.stu-peek{display:block}
-.stu-row.hit:hover{background:rgba(79,70,229,.10)}
-.stu-row:hover{background:rgba(20,22,27,.04);border-radius:.3rem}
+
+/* ── รายการที่ระบบเดาคำตอบให้ได้เอง ────────────────────────── */
+.rv-fix{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;
+  border:1px solid #C6E8D3;background:var(--good-bg);border-radius:var(--radius-sm);
+  padding:.5rem .7rem;margin-top:.55rem}
+.rv-fix .h{font-size:12px;font-weight:700;color:var(--good-ink);margin-right:.2rem}
+.rv-fix .i{display:inline-flex;gap:.35rem;align-items:baseline;font-size:12.5px;
+  background:var(--paper);border-radius:999px;padding:.15rem .6rem;color:var(--ink)}
+.rv-fix .i b{font-family:var(--mono);font-size:11px;color:var(--good-ink)}
 </style>
 """
 
@@ -123,6 +216,18 @@ def suggest(mark: review.Mark, text: str) -> str | None:
     return fixed if fixed != text[mark.start : mark.end] else None
 
 
+def row_kind(row: review.ReviewLine) -> str | None:
+    """สีเดียวต่อบรรทัด เอาชนิดที่ด่วนที่สุด — ผิดแน่ > ไม่นิ่ง > ตัวเลข
+
+    บรรทัดหนึ่งมีได้หลายชนิด แต่ถ้าระบายหลายสีในบรรทัดเดียว คนจะอ่านสีไม่ออก
+    จึงเลือกสีตามสิ่งที่ต้องทำก่อน แล้วรายละเอียดที่เหลืออยู่ในไฮไลต์ระดับคำ
+    """
+    for kind in _KIND:
+        if any(m.kind == kind for m in row.marks):
+            return kind
+    return None
+
+
 def _overlay(uri: str, w: int, h: int, rows: list) -> str:
     """วาดกรอบทับภาพตรงบรรทัดที่ต้องตรวจ พร้อมเลขกำกับให้ตรงกับฝั่งข้อความ
 
@@ -133,27 +238,23 @@ def _overlay(uri: str, w: int, h: int, rows: list) -> str:
     ไม่ต้องแปลงสเกลเอง ซึ่งเป็นจุดที่พลาดง่ายเวลาภาพถูกย่อให้พอดีคอลัมน์
     """
     shapes = []
-    n = 0
     for r in rows:
         if not r.box or not r.needs_check:
             continue
-        n += 1
         x, y, bw, bh = r.box
-        kind = "mixed" if any(m.kind == "mixed" for m in r.marks) else (
-            "shaky" if any(m.kind == "shaky" for m in r.marks) else "digit"
-        )
-        colour = _KIND[kind][2]
+        kind = row_kind(r) or "digit"
         shapes.append(
             f'<rect class="stu-hit k-{kind}" x="{x}" y="{y}" width="{bw}" height="{bh}"/>'
             f'<rect class="stu-box k-{kind}" x="{x}" y="{y}" width="{bw}" height="{bh}"'
             f' rx="8"/>'
-            f'<text class="stu-no" x="{max(x - 14, 8)}" y="{y + bh - 8}"'
-            f' fill="{colour}" text-anchor="end">{r.index + 1}</text>'
+            f'<text class="stu-no k-{kind}" x="{max(x - 14, 8)}" y="{y + bh - 8}"'
+            f' text-anchor="end">{r.index + 1}</text>'
         )
     return (
-        f'<div class="stu-wrap"><img src="{uri}" alt="หน้าเอกสาร">'
+        f'<div class="rv-stick"><div class="stu-wrap">'
+        f'<img src="{uri}" alt="หน้าเอกสาร">'
         f'<svg viewBox="0 0 {w} {h}" preserveAspectRatio="none">'
-        f'{"".join(shapes)}</svg></div>'
+        f'{"".join(shapes)}</svg></div></div>'
     )
 
 
@@ -184,6 +285,40 @@ def _inline(row: review.ReviewLine) -> str:
     if any(m.kind == "shaky" for m in row.marks):
         inner = f'<span class="shaky-line">{inner}</span>'
     return inner
+
+
+def _header(s: dict, rows: list, measured: bool) -> str:
+    """แถบสรุป — ตัวนับแต่ละสีพร้อมคำว่าเห็นสีนั้นแล้วต้องทำอะไร
+
+    ของเดิมเป็นป้ายตัวเลขล้วน ("ตัวเลข ๑๒") ซึ่งบอกไม่ได้ว่าสีนั้นแปลว่าอะไร
+    คนต้องชี้เมาส์ถามทีละจุดถึงจะรู้ ทั้งที่คำอธิบายควรอยู่ให้อ่านได้ตลอด
+    """
+    keys = []
+    for kind, (label, what) in _KIND.items():
+        n = s[{"digit": "digits", "mixed": "mixed", "shaky": "shaky"}[kind]]
+        if kind == "shaky" and not measured:
+            keys.append(
+                '<span class="rv-key off"><span class="n">—</span>'
+                '<span class="l">ไม่นิ่ง</span>'
+                '<span class="w">ยังไม่ได้วัด ไปแท็บ 🎯</span></span>'
+            )
+            continue
+        off = "" if n else " off"
+        keys.append(
+            f'<span class="rv-key k-{kind}{off}"><span class="n">{n}</span>'
+            f'<span class="l">{label}</span><span class="w">{what}</span></span>'
+        )
+
+    ticks = "".join(
+        f'<i class="k-{k}"></i>' if (k := row_kind(r)) else "<i></i>" for r in rows
+    )
+    return (
+        f'<div class="rv-head"><div class="rv-score">'
+        f'<span class="rv-big">{s["to_check"]}</span>'
+        f'<span class="rv-cap">บรรทัดต้องตรวจ<b>จาก {s["lines"]} บรรทัด</b></span>'
+        f'</div><div class="rv-keys">{"".join(keys)}</div></div>'
+        f'<div class="rv-map" title="ขีดละบรรทัด เรียงตามลำดับในหน้า">{ticks}</div>'
+    )
 
 
 def _picker(pages: list[PageInfo], results: dict):
@@ -269,34 +404,14 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
     )
     s = review.summary(rows)
 
-    head = st.columns([3, 1.3])
-    head[0].markdown(
-        f'<span class="stu-tag" style="background:#EEF0FF;color:#3730A3">'
-        f'ตัวเลข {s["digits"]}</span>'
-        + (f'<span class="stu-tag" style="background:#FCE7EA;color:#B0123B">'
-           f'ผิดแน่ {s["mixed"]}</span>' if s["mixed"] else "")
-        + (f'<span class="stu-tag" style="background:#FDF1DF;color:#93630A">'
-           f'ไม่นิ่ง {s["shaky"]}</span>' if shaky is not None else
-           '<span class="stu-tag" style="background:#EDEFF3;color:#5B5F6B">'
-           'ยังไม่ได้วัดความนิ่ง</span>'),
-        unsafe_allow_html=True,
-    )
-    head[1].markdown(
-        f'<div style="text-align:right;font-weight:700;font-size:1.05rem">'
-        f'ต้องตรวจ {s["to_check"]} จาก {s["lines"]} บรรทัด</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(_header(s, rows, shaky is not None), unsafe_allow_html=True)
 
     img_dir = CLEAN_IMAGE_DIR if engine.endswith("+clean") else IMAGE_DIR
     img = img_dir / f"{picked.page_id}.png"
 
     left, right = st.columns([1, 1.05])
     with left:
-        st.caption(
-            f"ภาพที่ engine อ่านจริง · กรอบชี้บรรทัดที่ต้องตรวจ "
-            f"(ยืมพิกัดจาก `{donor}` ได้ {s['with_box']}/{s['lines']} บรรทัด)"
-            if donor else "ไม่มี engine ที่คืนพิกัดสำหรับหน้านี้ จึงวาดกรอบไม่ได้"
-        )
+        st.markdown(_image_meta(donor, s), unsafe_allow_html=True)
         if img.exists():
             uri, w, h = cached_image(img)
             st.markdown(_overlay(uri, w, h, rows), unsafe_allow_html=True)
@@ -304,18 +419,37 @@ def view_review(pages: list[PageInfo], results: dict) -> None:
             st.warning(f"ไม่พบภาพใน {img_dir.name}/")
 
     with right:
-        _text_panel(picked, engine, rows, lines, saved, img, s)
+        _text_panel(picked, engine, rows, lines, saved, img)
 
 
-def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
+def _image_meta(donor: str | None, s: dict) -> str:
+    """ป้ายสั้น ๆ บอกที่มาของภาพและพิกัด แทนคำบรรยายยาวแบบบรรทัด log
+
+    เรื่องพิกัดยืมมาสำคัญพอที่จะต้องเห็นทุกครั้ง เพราะบรรทัดที่ยืมไม่ได้
+    จะไม่มีกรอบบนภาพ ซึ่งดูเผิน ๆ เหมือนบรรทัดนั้นไม่มีปัญหา
+    """
+    chips = ['<span class="rv-chip">ภาพที่ engine อ่านจริง</span>']
+    if donor is None:
+        chips.append('<span class="rv-chip warn">ไม่มี engine ไหนคืนพิกัด วาดกรอบไม่ได้</span>')
+    else:
+        full = s["with_box"] >= s["lines"]
+        chips.append(f'<span class="rv-chip mono">พิกัดยืมจาก {html.escape(donor)}</span>')
+        chips.append(
+            f'<span class="rv-chip {"good" if full else "warn"}">'
+            f'ชี้จุดได้ {s["with_box"]}/{s["lines"]} บรรทัด</span>'
+        )
+    return f'<div class="rv-meta">{"".join(chips)}</div>'
+
+
+def _text_panel(picked, engine, rows, lines, saved, img) -> None:
     """ฝั่งข้อความ — แสดงเป็นเอกสารต่อเนื่อง ไม่ใช่บรรทัดละก้อน
 
     ของเดิมวาดป้าย "บรรทัด N · ตัวเลข" กับคำอธิบายคั่นทุกบรรทัดที่ mark
     ผลคือข้อความถูกหั่นเป็นชิ้น อ่านเป็นเอกสารไม่ได้ ทั้งที่คนตรวจต้อง
     อ่านความต่อเนื่องเพื่อรู้ว่าคำไหนควรเป็นอะไร
 
-    ตอนนี้เลขบรรทัดอยู่ริมซ้ายเป็นแถบ gutter บรรทัดที่ต้อง mark มีพื้นหลังจาง
-    ข้อมูลว่าทำไมถึง mark ย้ายไปอยู่ใน tooltip ของช่วงที่ระบายสี
+    ตอนนี้เลขบรรทัดอยู่ริมซ้ายเป็นแถบ gutter บรรทัดที่ต้อง mark มีแถบสีคาดซ้าย
+    ตามชนิดจุด ตรงกับสีของกรอบบนภาพ ส่วนเหตุผลอยู่ในทูลทิปของช่วงที่ระบายสี
     """
     bar = st.columns([1.3, 1.6, 1.6])
     editing = bar[0].toggle("แก้ข้อความ", value=False, key="rv_edit")
@@ -330,8 +464,21 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
     )
     if editing:
         only = False
-    if saved is not None:
-        bar[2].caption(f"มีฉบับที่แก้ไว้ {len(lines)} บรรทัด")
+
+    # st.success ที่วางไว้ก่อน st.rerun ไม่เคยถูกวาด — เก็บสถานะข้ามรอบมาแทน
+    just = st.session_state.pop("rv_just_saved", None) == picked.page_id
+    if just:
+        bar[2].markdown(
+            '<div class="rv-meta" style="margin-top:.55rem">'
+            '<span class="rv-chip good">บันทึกแล้ว</span></div>',
+            unsafe_allow_html=True,
+        )
+    elif saved is not None:
+        bar[2].markdown(
+            f'<div class="rv-meta" style="margin-top:.55rem">'
+            f'<span class="rv-chip">กำลังดูฉบับที่แก้ไว้ · {len(lines)} บรรทัด</span></div>',
+            unsafe_allow_html=True,
+        )
 
     shown = [r for r in rows if r.needs_check or not only]
     if not shown:
@@ -340,14 +487,28 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
 
     mtime = img.stat().st_mtime if img.exists() else 0.0
     body = []
-    for r in shown:
-        cls = "stu-row hit" if r.needs_check else "stu-row"
+    prev = None
+    for seat, r in enumerate(shown):
+        if prev is not None and r.index > prev + 1:
+            body.append(
+                f'<div class="stu-gap">ข้าม {r.index - prev - 1} บรรทัดที่ไม่มีจุดต้องตรวจ</div>'
+            )
+        prev = r.index
+
+        kind = row_kind(r)
+        cls = f"stu-row hit k-{kind}" if kind else "stu-row"
+        if seat < 2:
+            cls += " dn"  # สองบรรทัดบนสุดไม่มีที่ให้ภาพลอยขึ้นข้างบน
         # ทำภาพให้ทุกบรรทัดที่มีพิกัด ไม่ใช่เฉพาะที่ mark — คนตรวจอาจสงสัย
         # บรรทัดที่ระบบไม่ได้ชี้ก็ได้ วัดแล้วหน้าที่ใหญ่สุดโตจาก 108 เป็น 162 KB
         peek = peek_uri(str(img), tuple(r.box), mtime) if r.box and img.exists() else None
+        # ป้ายบอกครบทุกชนิด ไม่ใช่เฉพาะชนิดหลักที่ใช้เลือกสี
+        got = [lb for k, (lb, _) in _KIND.items() if any(m.kind == k for m in r.marks)]
+        why = " · " + " · ".join(got) if got else ""
         shot = (
             f'<span class="stu-peek"><img src="{peek}" alt="ภาพบรรทัดนี้">'
-            f'<span class="cap">บรรทัด {r.index + 1} จากภาพจริง</span></span>'
+            f'<span class="cap"><b>บรรทัด {r.index + 1}</b>ภาพจริงจากหน้าเอกสาร{why}'
+            f"</span></span>"
             if peek else ""
         )
         body.append(
@@ -358,26 +519,28 @@ def _text_panel(picked, engine, rows, lines, saved, img, s) -> None:
     st.caption("ชี้เมาส์ที่บรรทัดไหนก็ได้ เพื่อดูภาพจริงของบรรทัดนั้น")
 
     # คำแนะนำรวมไว้ที่เดียวใต้กล่อง ไม่แทรกคั่นกลางข้อความ
-    hints = [
-        f"บรรทัด {r.index + 1}: {f}"
+    fixes = [
+        (r.index + 1, f)
         for r in shown
         for m in r.marks
         if (f := suggest(m, r.text))
     ]
-    if hints:
-        st.caption("แก้ได้เลยโดยไม่ต้องดูภาพ — " + " · ".join(hints[:6]))
+    if fixes:
+        items = "".join(
+            f'<span class="i"><b>{n}</b>{html.escape(f)}</span>' for n, f in fixes[:8]
+        )
+        more = f'<span class="i">+{len(fixes) - 8}</span>' if len(fixes) > 8 else ""
+        st.markdown(
+            f'<div class="rv-fix"><span class="h">แก้ได้เลยไม่ต้องดูภาพ</span>'
+            f"{items}{more}</div>",
+            unsafe_allow_html=True,
+        )
 
     # ช่องพิมพ์วางต่อท้ายมุมมองอ่าน ไม่ใช่แทนที่
     # เดิมกดแก้แล้วไฮไลต์หายหมด กลายเป็นข้อความเปล่า ๆ ไม่รู้ว่าต้องแก้ตรงไหน
     # ต้องปิดโหมดแก้ไปดู แล้วเปิดกลับมาแก้ ซึ่งจำไม่ไหวว่าบรรทัดไหนบ้าง
     if editing:
         _edit_panel(picked, engine, lines, saved)
-
-    if s["with_box"] < s["lines"]:
-        st.caption(
-            f"ยืมพิกัดได้ {s['with_box']}/{s['lines']} บรรทัด — "
-            "ที่เหลือกดดูภาพตรงจุดไม่ได้ ต้องสแกน tesseract หน้านี้เพิ่ม"
-        )
 
 
 def _edit_panel(picked, engine, lines: list[str], saved: str | None) -> None:
@@ -408,7 +571,7 @@ def _edit_panel(picked, engine, lines: list[str], saved: str | None) -> None:
         key=f"rv_save|{picked.page_id}",
     ):
         markdown_out.save_page(picked.page_id, engine, "\n".join(new))
-        st.success(f"บันทึกแล้ว {len(new)} บรรทัด")
+        st.session_state["rv_just_saved"] = picked.page_id
         st.rerun()
 
     if saved is not None and b[1].button("ล้างที่แก้ไว้", key=f"rv_reset|{picked.page_id}"):
