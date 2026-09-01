@@ -99,11 +99,32 @@ CSS = """
 .rv-chip.warn{background:var(--warn-bg);color:var(--warn-ink);border-color:#F0DCBA}
 .rv-chip.good{background:var(--good-bg);color:var(--good-ink);border-color:#C6E8D3}
 
-/* ── กล่องข้อความ ─────────────────────────────────────────── */
-.stu-doc{border:1px solid var(--border);border-radius:var(--radius);
-  padding:.8rem .9rem .8rem 0;background:var(--paper)}
+/* ── กล่องข้อความ ─────────────────────────────────────────────
+   กล่องนี้เป็นแถวของ Streamlit ไม่ใช่ HTML ก้อนเดียวเหมือนก่อน เพราะเลขบรรทัด
+   ต้องเป็นปุ่มจริง (ฝังปุ่มใน markdown ไม่ได้) แลกมาด้วยการต้องรีดช่องไฟ
+   ที่ Streamlit ใส่ให้ทุกบล็อกออก ไม่งั้นข้อความไม่ต่อเนื่องเป็นเอกสาร */
+.st-key-rvdoc{padding:.7rem .8rem .7rem .3rem;background:var(--paper)}
+.st-key-rvdoc [data-testid="stVerticalBlock"]{gap:0}
+.st-key-rvdoc [data-testid="stElementContainer"]{margin:0}
+/* popup ภาพต้องล้นออกนอกคอลัมน์ได้ */
+.st-key-rvdoc [data-testid="stColumn"]{overflow:visible}
+.st-key-rvdoc [data-testid="stHorizontalBlock"]{align-items:flex-start}
+
+/* เลขบรรทัดคือปุ่ม แต่ต้องดูเป็นเลข ไม่ใช่ปุ่ม จนกว่าจะเอาเมาส์ไปชี้
+   เจาะจงที่ tertiary เท่านั้น ปุ่มบันทึก/ยกเลิกในกล่องเดียวกันจะได้ไม่โดนกลืน */
+.st-key-rvdoc [data-testid="stBaseButton-tertiary"]{font-family:var(--mono);
+  font-size:11px;font-weight:400;color:var(--ink-soft);opacity:.5;
+  padding:.25rem 0 0;min-height:0;border:none;background:transparent;
+  justify-content:flex-end}
+.st-key-rvdoc [data-testid="stBaseButton-tertiary"]:hover{opacity:1;
+  color:var(--accent);background:transparent;text-decoration:underline}
+.st-key-rvdoc [data-testid="stBaseButton-tertiary"]:focus-visible{opacity:1;
+  color:var(--accent)}
+.rv-live-no{font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--accent);text-align:right;padding-top:.6rem}
+
 .stu-row{display:flex;gap:.6rem;align-items:baseline;position:relative;
-  padding:.2rem .5rem .2rem 0;border-left:3px solid transparent}
+  padding:.2rem .5rem .2rem .45rem;border-left:3px solid transparent}
 .stu-row.hit.k-digit{border-left-color:var(--rv-digit);background:var(--rv-digit-bg)}
 .stu-row.hit.k-mixed{border-left-color:var(--rv-mixed);background:var(--rv-mixed-bg)}
 .stu-row.hit.k-shaky{border-left-color:var(--rv-shaky);background:var(--rv-shaky-bg)}
@@ -113,14 +134,8 @@ CSS = """
 /* ช่องว่างตรงที่ตัวกรองซ่อนบรรทัดไว้ — ไม่งั้นเลขบรรทัดกระโดดโดยไม่มีสัญญาณ
    แล้วคนจะนึกว่าเอกสารขาดหายไปจริง ๆ */
 .stu-gap{display:flex;align-items:center;gap:.55rem;user-select:none;
-  padding:.2rem .5rem .2rem 2.9rem;font-size:10.5px;color:var(--ink-soft);opacity:.6}
+  padding:.25rem .5rem .25rem 3.4rem;font-size:10.5px;color:var(--ink-soft);opacity:.6}
 .stu-gap::after{content:"";flex:1;height:1px;background:var(--border)}
-.stu-gut{font-family:var(--mono);font-size:11px;color:var(--ink-soft);opacity:.5;
-  min-width:2.3em;text-align:right;flex:none;user-select:none}
-.stu-row.hit .stu-gut{opacity:1;font-weight:700}
-.stu-row.hit.k-digit .stu-gut{color:var(--rv-digit)}
-.stu-row.hit.k-mixed .stu-gut{color:var(--rv-mixed)}
-.stu-row.hit.k-shaky .stu-gut{color:var(--rv-shaky)}
 .stu-txt{font-size:15.5px;line-height:1.95;word-break:break-word;flex:1}
 .num{background:var(--rv-digit-bg);color:#3730A3;border-radius:4px;
   padding:0 .12em;font-weight:600;position:relative;cursor:help}
@@ -138,16 +153,16 @@ CSS = """
   white-space:normal;max-width:250px;width:max-content;opacity:0;visibility:hidden;
   pointer-events:none;transition:opacity .12s ease;z-index:70}
 .num:hover::after{opacity:1;visibility:visible}
-.stu-doc .wrong::after{bottom:auto;top:calc(100% + 7px)}
-.stu-doc .wrong::before{bottom:auto;top:100%;
+.stu-row .wrong::after{bottom:auto;top:calc(100% + 7px)}
+.stu-row .wrong::before{bottom:auto;top:100%;
   border-top-color:transparent;border-bottom-color:var(--ink)}
 
 /* ── ภาพครอปเด้งเหนือบรรทัดที่ชี้ ไม่ใช่ตำแหน่งคงที่บนกล่อง ──
    เคยลองวางไว้บนสุดของกล่องแล้ว แต่พอชี้บรรทัดล่าง ๆ ภาพจะอยู่นอกจอที่มองเห็น
    กล่องจึงต้องไม่มี overflow ของตัวเอง ไม่งั้นภาพเหนือบรรทัดแรก ๆ ถูกตัดหัวทิ้ง
    ใช้ CSS ล้วน ไม่ง้อ JS เพราะ Streamlit ตัด script ที่ฝังมากับ markdown ทิ้ง */
-.stu-peek{display:none;position:absolute;left:2.9rem;bottom:calc(100% + 9px);
-  z-index:60;width:min(620px,calc(100% - 3.2rem));padding:.4rem;
+.stu-peek{display:none;position:absolute;left:.45rem;bottom:calc(100% + 9px);
+  z-index:60;width:min(620px,calc(100% - .6rem));padding:.4rem;
   background:var(--paper);border:1px solid var(--border);
   border-radius:var(--radius-sm);box-shadow:0 12px 34px rgba(20,22,27,.20)}
 .stu-peek::after{content:"";position:absolute;left:1.5rem;top:100%;
@@ -441,40 +456,130 @@ def _image_meta(donor: str | None, s: dict) -> str:
     return f'<div class="rv-meta">{"".join(chips)}</div>'
 
 
+def _slot(picked, engine: str) -> str:
+    """คีย์บอกว่าตอนนี้กำลังแก้บรรทัดของหน้าไหน/engine ไหนอยู่
+
+    ต้องผูกกับหน้าและ engine ไม่ใช่เก็บแค่เลขบรรทัด ไม่งั้นเปิดแก้บรรทัด ๗
+    แล้วกดข้ามหน้า หน้าใหม่จะเปิดช่องแก้บรรทัด ๗ ค้างไว้เองทั้งที่ไม่ได้สั่ง
+    """
+    return f"{picked.page_id}|{engine}"
+
+
+def _editing_at(picked, engine: str) -> int | None:
+    at = st.session_state.get("rv_ln")
+    return at[1] if at and at[0] == _slot(picked, engine) else None
+
+
+def _close_edit(picked, engine: str, index: int) -> None:
+    """ปิดช่องแก้ พร้อมทิ้งค่าที่พิมพ์ค้างไว้ใน widget
+
+    ถ้าไม่ทิ้ง พอเปิดบรรทัดเดิมอีกครั้ง Streamlit จะคืนค่าที่เคยพิมพ์
+    แทนค่าที่บันทึกไปแล้ว ซึ่งดูเหมือนบันทึกไม่ติด
+    """
+    st.session_state.pop("rv_ln", None)
+    st.session_state.pop(f"rvtxt|{_slot(picked, engine)}|{index}", None)
+
+
+def _read_row(r: review.ReviewLine, seat: int, img, mtime: float, slot: str) -> bool:
+    """บรรทัดโหมดอ่าน — เลขบรรทัดคือปุ่ม กดแล้วแก้ตรงนั้น คืน True ถ้าถูกกด
+
+    ทำไมต้องเป็นแถวของ Streamlit ไม่ใช่ HTML ก้อนเดียวเหมือนก่อน:
+    ปุ่มจริงฝังใน markdown ไม่ได้ และถ้าไม่มีปุ่มต่อบรรทัด คนก็ต้องเลื่อนลง
+    ไปหาช่องพิมพ์ที่ก้นหน้า ซึ่งไกลจากจุดที่กำลังดูอยู่
+    """
+    c = st.columns([0.62, 9.38], gap="small", vertical_alignment="top")
+    hit = c[0].button(
+        str(r.index + 1),
+        key=f"rvln|{slot}|{r.index}",
+        type="tertiary",
+        help="กดเพื่อแก้บรรทัดนี้",
+        width="stretch",
+    )
+
+    kind = row_kind(r)
+    cls = f"stu-row hit k-{kind}" if kind else "stu-row"
+    if seat < 2:
+        cls += " dn"  # สองบรรทัดบนสุดไม่มีที่ให้ภาพลอยขึ้นข้างบน
+    # ทำภาพให้ทุกบรรทัดที่มีพิกัด ไม่ใช่เฉพาะที่ mark — คนตรวจอาจสงสัย
+    # บรรทัดที่ระบบไม่ได้ชี้ก็ได้ วัดแล้วหน้าที่ใหญ่สุดโตจาก 108 เป็น 162 KB
+    peek = peek_uri(str(img), tuple(r.box), mtime) if r.box and img.exists() else None
+    # ป้ายบอกครบทุกชนิด ไม่ใช่เฉพาะชนิดหลักที่ใช้เลือกสี
+    got = [lb for k, (lb, _) in _KIND.items() if any(m.kind == k for m in r.marks)]
+    why = " · " + " · ".join(got) if got else ""
+    shot = (
+        f'<span class="stu-peek"><img src="{peek}" alt="ภาพบรรทัดนี้">'
+        f'<span class="cap"><b>บรรทัด {r.index + 1}</b>ภาพจริงจากหน้าเอกสาร{why}'
+        f"</span></span>"
+        if peek else ""
+    )
+    c[1].markdown(
+        f'<div class="{cls}">{shot}<span class="stu-txt">{_inline(r)}</span></div>',
+        unsafe_allow_html=True,
+    )
+    return hit
+
+
+def _edit_row(r: review.ReviewLine, picked, engine: str, lines: list[str]) -> None:
+    """ช่องพิมพ์แทนที่บรรทัดนั้นตรงตำแหน่งเดิม บรรทัดอื่นยังอ่านได้ปกติ
+
+    เดิมช่องพิมพ์เป็นก้อนเดียวทั้งหน้าอยู่ก้นหน้า พอจะแก้บรรทัดที่ ๖ ต้องเลื่อน
+    ลงไปไกลจากไฮไลต์ที่กำลังดู แล้วเลื่อนกลับขึ้นมาเทียบ — เสียจังหวะทุกครั้ง
+    """
+    slot = _slot(picked, engine)
+    c = st.columns([0.62, 7.1, 2.28], gap="small", vertical_alignment="top")
+    c[0].markdown(f'<div class="rv-live-no">{r.index + 1}</div>', unsafe_allow_html=True)
+    text = c[1].text_input(
+        f"แก้บรรทัด {r.index + 1}",
+        value=r.text,
+        key=f"rvtxt|{slot}|{r.index}",
+        label_visibility="collapsed",
+    )
+    act = c[2].columns(2, gap="small")
+    if act[0].button(
+        "บันทึก", type="primary", key=f"rvok|{slot}|{r.index}", width="stretch"
+    ):
+        new = list(lines)
+        new[r.index] = text.strip()
+        markdown_out.save_page(picked.page_id, engine, "\n".join(new))
+        st.session_state["rv_just_saved"] = picked.page_id
+        _close_edit(picked, engine, r.index)
+        st.rerun()
+    if act[1].button("ยกเลิก", key=f"rvno|{slot}|{r.index}", width="stretch"):
+        _close_edit(picked, engine, r.index)
+        st.rerun()
+
+
 def _text_panel(picked, engine, rows, lines, saved, img) -> None:
-    """ฝั่งข้อความ — แสดงเป็นเอกสารต่อเนื่อง ไม่ใช่บรรทัดละก้อน
+    """ฝั่งข้อความ — เอกสารต่อเนื่องที่กดแก้ได้ทีละบรรทัดตรงตำแหน่ง
 
     ของเดิมวาดป้าย "บรรทัด N · ตัวเลข" กับคำอธิบายคั่นทุกบรรทัดที่ mark
     ผลคือข้อความถูกหั่นเป็นชิ้น อ่านเป็นเอกสารไม่ได้ ทั้งที่คนตรวจต้อง
     อ่านความต่อเนื่องเพื่อรู้ว่าคำไหนควรเป็นอะไร
 
-    ตอนนี้เลขบรรทัดอยู่ริมซ้ายเป็นแถบ gutter บรรทัดที่ต้อง mark มีแถบสีคาดซ้าย
-    ตามชนิดจุด ตรงกับสีของกรอบบนภาพ ส่วนเหตุผลอยู่ในทูลทิปของช่วงที่ระบายสี
+    ตอนนี้เลขบรรทัดริมซ้ายเป็นปุ่ม กดแล้วบรรทัดนั้นกลายเป็นช่องพิมพ์ตรงที่เดิม
+    ไม่ต้องเลื่อนไปหาช่องแก้ที่อื่น บรรทัดที่เหลือยังระบายสีให้เทียบได้ตลอด
     """
-    bar = st.columns([1.3, 1.6, 1.6])
-    editing = bar[0].toggle("แก้ข้อความ", value=False, key="rv_edit")
-    # ตอนแก้ต้องแสดงทุกบรรทัด ไม่งั้นเลขบรรทัดด้านบนไม่ตรงกับในช่องพิมพ์
-    # (ด้านบนกรองเหลือบางบรรทัด แต่ช่องพิมพ์มีครบทุกบรรทัดเสมอ)
-    only = bar[1].toggle(
+    at = _editing_at(picked, engine)
+    bar = st.columns([1.9, 2.2])
+    only = bar[0].toggle(
         "เฉพาะที่ต้องตรวจ",
         value=True,
         key="rv_only",
-        disabled=editing,
-        help="ปิดเองตอนแก้ข้อความ เพื่อให้เลขบรรทัดตรงกับช่องพิมพ์",
+        disabled=at is not None,
+        help="ปิดเองตอนกำลังแก้บรรทัด เพื่อไม่ให้บรรทัดที่แก้อยู่หายไปกลางคัน",
     )
-    if editing:
+    if at is not None:
         only = False
 
     # st.success ที่วางไว้ก่อน st.rerun ไม่เคยถูกวาด — เก็บสถานะข้ามรอบมาแทน
-    just = st.session_state.pop("rv_just_saved", None) == picked.page_id
-    if just:
-        bar[2].markdown(
+    if st.session_state.pop("rv_just_saved", None) == picked.page_id:
+        bar[1].markdown(
             '<div class="rv-meta" style="margin-top:.55rem">'
             '<span class="rv-chip good">บันทึกแล้ว</span></div>',
             unsafe_allow_html=True,
         )
     elif saved is not None:
-        bar[2].markdown(
+        bar[1].markdown(
             f'<div class="rv-meta" style="margin-top:.55rem">'
             f'<span class="rv-chip">กำลังดูฉบับที่แก้ไว้ · {len(lines)} บรรทัด</span></div>',
             unsafe_allow_html=True,
@@ -486,37 +591,24 @@ def _text_panel(picked, engine, rows, lines, saved, img) -> None:
         return
 
     mtime = img.stat().st_mtime if img.exists() else 0.0
-    body = []
-    prev = None
-    for seat, r in enumerate(shown):
-        if prev is not None and r.index > prev + 1:
-            body.append(
-                f'<div class="stu-gap">ข้าม {r.index - prev - 1} บรรทัดที่ไม่มีจุดต้องตรวจ</div>'
-            )
-        prev = r.index
+    slot = _slot(picked, engine)
+    with st.container(border=True, key="rvdoc", gap="xxsmall"):
+        prev = None
+        for seat, r in enumerate(shown):
+            if prev is not None and r.index > prev + 1:
+                st.markdown(
+                    f'<div class="stu-gap">ข้าม {r.index - prev - 1} '
+                    f"บรรทัดที่ไม่มีจุดต้องตรวจ</div>",
+                    unsafe_allow_html=True,
+                )
+            prev = r.index
+            if r.index == at:
+                _edit_row(r, picked, engine, lines)
+            elif _read_row(r, seat, img, mtime, slot):
+                st.session_state["rv_ln"] = (slot, r.index)
+                st.rerun()
 
-        kind = row_kind(r)
-        cls = f"stu-row hit k-{kind}" if kind else "stu-row"
-        if seat < 2:
-            cls += " dn"  # สองบรรทัดบนสุดไม่มีที่ให้ภาพลอยขึ้นข้างบน
-        # ทำภาพให้ทุกบรรทัดที่มีพิกัด ไม่ใช่เฉพาะที่ mark — คนตรวจอาจสงสัย
-        # บรรทัดที่ระบบไม่ได้ชี้ก็ได้ วัดแล้วหน้าที่ใหญ่สุดโตจาก 108 เป็น 162 KB
-        peek = peek_uri(str(img), tuple(r.box), mtime) if r.box and img.exists() else None
-        # ป้ายบอกครบทุกชนิด ไม่ใช่เฉพาะชนิดหลักที่ใช้เลือกสี
-        got = [lb for k, (lb, _) in _KIND.items() if any(m.kind == k for m in r.marks)]
-        why = " · " + " · ".join(got) if got else ""
-        shot = (
-            f'<span class="stu-peek"><img src="{peek}" alt="ภาพบรรทัดนี้">'
-            f'<span class="cap"><b>บรรทัด {r.index + 1}</b>ภาพจริงจากหน้าเอกสาร{why}'
-            f"</span></span>"
-            if peek else ""
-        )
-        body.append(
-            f'<div class="{cls}">{shot}<span class="stu-gut">{r.index + 1}</span>'
-            f'<span class="stu-txt">{_inline(r)}</span></div>'
-        )
-    st.markdown(f'<div class="stu-doc">{"".join(body)}</div>', unsafe_allow_html=True)
-    st.caption("ชี้เมาส์ที่บรรทัดไหนก็ได้ เพื่อดูภาพจริงของบรรทัดนั้น")
+    st.caption("ชี้เมาส์ที่บรรทัดไหนก็ได้เพื่อดูภาพจริง · กดเลขบรรทัดเพื่อแก้ตรงนั้น")
 
     # คำแนะนำรวมไว้ที่เดียวใต้กล่อง ไม่แทรกคั่นกลางข้อความ
     fixes = [
@@ -536,49 +628,43 @@ def _text_panel(picked, engine, rows, lines, saved, img) -> None:
             unsafe_allow_html=True,
         )
 
-    # ช่องพิมพ์วางต่อท้ายมุมมองอ่าน ไม่ใช่แทนที่
-    # เดิมกดแก้แล้วไฮไลต์หายหมด กลายเป็นข้อความเปล่า ๆ ไม่รู้ว่าต้องแก้ตรงไหน
-    # ต้องปิดโหมดแก้ไปดู แล้วเปิดกลับมาแก้ ซึ่งจำไม่ไหวว่าบรรทัดไหนบ้าง
-    if editing:
-        _edit_panel(picked, engine, lines, saved)
+    _whole_page(picked, engine, lines, saved)
 
 
-def _edit_panel(picked, engine, lines: list[str], saved: str | None) -> None:
-    """ช่องพิมพ์ทั้งหน้า วางไว้ใต้มุมมองอ่าน ไม่ใช่แทนที่
+def _whole_page(picked, engine, lines: list[str], saved: str | None) -> None:
+    """ช่องพิมพ์ทั้งหน้า เก็บพับไว้ ไม่ใช่ทางหลักอีกแล้ว
 
-    ช่องละบรรทัดทำให้ย้ายข้อความข้ามบรรทัดไม่ได้ ซึ่งจำเป็นเวลา OCR
-    หั่นบรรทัดผิดที่ — เคสที่เจอบ่อยกับ engine ที่ตีกรอบพลาด
-
-    ต้องเห็นมุมมองอ่านพร้อมกันด้วย เพราะช่องพิมพ์เป็นข้อความเปล่า ไม่มีไฮไลต์
-    บอกว่าจุดไหนต้องแก้ ถ้าซ่อนมุมมองอ่านไป คนจะต้องปิดโหมดแก้ไปดูว่าบรรทัดไหน
-    แล้วเปิดกลับมาแก้ ซึ่งจำไม่ไหวเมื่อมีหลายจุด
+    ยังต้องมีอยู่เพราะช่องรายบรรทัดย้ายข้อความข้ามบรรทัดไม่ได้ ซึ่งจำเป็นเวลา
+    OCR หั่นบรรทัดผิดที่ — เคสที่เจอบ่อยกับ engine ที่ตีกรอบพลาด
+    แต่เป็นงานที่นาน ๆ ทำที จึงไม่ควรกินที่เหนือกว่าการแก้ทีละบรรทัด
     """
-    st.markdown("---")
-    st.caption("พิมพ์แก้ได้เลย — เทียบกับที่ระบายสีด้านบน")
-    text = st.text_area(
-        "ข้อความทั้งหน้า",
-        value="\n".join(lines),
-        height=460,
-        key=f"rv_area|{picked.page_id}|{engine}",
-        label_visibility="collapsed",
-    )
-    new = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    changed = new != lines
+    with st.expander("แก้ทั้งหน้าในช่องเดียว — ใช้ตอนต้องย้ายข้อความข้ามบรรทัด"):
+        text = st.text_area(
+            "ข้อความทั้งหน้า",
+            value="\n".join(lines),
+            height=420,
+            key=f"rv_area|{picked.page_id}|{engine}",
+            label_visibility="collapsed",
+        )
+        new = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        changed = new != lines
 
-    b = st.columns([1.5, 1.3, 2])
-    if b[0].button(
-        "บันทึกการแก้ไข", type="primary", disabled=not changed,
-        key=f"rv_save|{picked.page_id}",
-    ):
-        markdown_out.save_page(picked.page_id, engine, "\n".join(new))
-        st.session_state["rv_just_saved"] = picked.page_id
-        st.rerun()
+        b = st.columns([1.5, 1.3, 2])
+        if b[0].button(
+            "บันทึกทั้งหน้า", type="primary", disabled=not changed,
+            key=f"rv_save|{picked.page_id}",
+        ):
+            markdown_out.save_page(picked.page_id, engine, "\n".join(new))
+            st.session_state["rv_just_saved"] = picked.page_id
+            st.rerun()
 
-    if saved is not None and b[1].button("ล้างที่แก้ไว้", key=f"rv_reset|{picked.page_id}"):
-        markdown_out.clear_page(picked.page_id, engine)
-        st.rerun()
+        if saved is not None and b[1].button(
+            "ล้างที่แก้ไว้", key=f"rv_reset|{picked.page_id}"
+        ):
+            markdown_out.clear_page(picked.page_id, engine)
+            st.rerun()
 
-    b[2].caption(
-        f"{len(new)} บรรทัด · "
-        + ("มีการแก้ ยังไม่บันทึก" if changed else "ยังไม่ได้แก้อะไร")
-    )
+        b[2].caption(
+            f"{len(new)} บรรทัด · "
+            + ("มีการแก้ ยังไม่บันทึก" if changed else "ยังไม่ได้แก้อะไร")
+        )

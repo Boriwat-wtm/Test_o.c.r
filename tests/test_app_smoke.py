@@ -70,3 +70,33 @@ def test_แต่ละแท็บวาดอะไรออกมาจร�
     """
     assert app.dataframe, "ไม่มีตารางเลยสักอัน"
     assert app.metric, "ไม่มีเมตริกเลยสักอัน"
+
+
+def test_กดเลขบรรทัดแล้วได้ช่องแก้ตรงบรรทัดนั้น() -> None:
+    """หัวใจของหน้าตรวจงาน — กดเลขบรรทัดแล้วต้องแก้ได้ตรงที่เดิม
+
+    ทำไมต้องมีเทสต์นี้: การแก้ทีละบรรทัดพึ่ง session_state สามคีย์ที่ต้อง
+    สอดคล้องกัน (rv_ln ที่ผูกกับหน้า+engine, คีย์ปุ่ม, คีย์ช่องพิมพ์) ถ้าคีย์
+    ไหนหลุด ปุ่มจะกดแล้วไม่มีอะไรเกิดขึ้น ซึ่งไม่โยน exception ให้จับ
+    """
+    at = AppTest.from_file("app.py", default_timeout=300)
+    at.run()
+    assert not at.exception, "\n".join(str(e) for e in at.exception)
+
+    nums = [b for b in at.button if b.key and b.key.startswith("rvln|")]
+    if not nums:
+        pytest.skip("หน้าที่เลือกไว้ไม่มีบรรทัดให้ตรวจ")
+
+    nums[0].click().run()
+    assert not at.exception, "\n".join(str(e) for e in at.exception)
+
+    line = nums[0].key.split("|")[-1]
+    boxes = [t for t in at.text_input if t.key and t.key.endswith(f"|{line}")]
+    assert boxes, f"กดบรรทัด {line} แล้วไม่มีช่องพิมพ์โผล่มา"
+
+    # ยกเลิกแล้วต้องกลับเป็นโหมดอ่าน ไม่ค้างเป็นช่องพิมพ์
+    cancel = [b for b in at.button if b.key and b.key.startswith("rvno|")]
+    assert cancel, "ไม่มีปุ่มยกเลิกให้กดกลับ"
+    cancel[0].click().run()
+    assert not at.exception, "\n".join(str(e) for e in at.exception)
+    assert not [t for t in at.text_input if t.key and t.key.startswith("rvtxt|")]
